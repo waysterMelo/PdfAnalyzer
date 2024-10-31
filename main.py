@@ -27,10 +27,10 @@ from openpyxl.workbook import Workbook
 from pytesseract import pytesseract
 from ttkthemes.themed_tk import ThemedTk
 
-SECRET_KEY = b"waystermelo@"  # Substitua por uma chave secreta forte
+SECRET_KEY = b"waystermelo@"
 LICENSE_FILE = "license.txt"
 
-# Caminho absoluto para a imagem de fundo
+
 image_path = os.path.join(os.path.dirname(__file__), 'img', 'logo.webp')
 
 def create_signature(data):
@@ -144,8 +144,8 @@ def iniciar_interface_principal():
     start_button.place(relx=0.5, rely=0.55, anchor='center')
 
     # Direitos autorais no final da tela
-    copyright_label = tk.Label(root, text="Direitos Autorais © Wayster Cruz de Melo",
-                               font=("Helvetica", 12, "italic"), fg="#FFFFFF", bg="#1C2833", padx=5, pady=5)
+    copyright_label = tk.Label(root, text="Direitos Autorais © Arquindex.",
+                               font=("Helvetica", 12, "bold"), fg="#FFFFFF", bg="#1C2833", padx=5, pady=5)
     copyright_label.place(relx=0.01, rely=0.95, anchor='w')
 
     # Iniciar o loop da interface gráfica
@@ -614,13 +614,11 @@ class AnalysisScreen:
     def delete_selected_pdf(self):
         try:
             selected_items = self.pending_files_tree.selection()
-
             if not selected_items:
                 messagebox.showwarning("Aviso", "Nenhum PDF selecionado!")
                 return
 
             pages_to_delete = {}
-
             for item in selected_items:
                 pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
                 page_index = int(page_info) - 1  # Verificando índice zero-based
@@ -634,7 +632,6 @@ class AnalysisScreen:
 
                 if os.path.exists(pdf_path):
                     with fitz.open(pdf_path) as pdf_document:
-                        # Verifica se as páginas existem
                         for page_index in sorted(page_indices, reverse=True):
                             if page_index < pdf_document.page_count:
                                 pdf_document.delete_page(page_index)
@@ -646,17 +643,33 @@ class AnalysisScreen:
                         pdf_document.save(temp_pdf_path, garbage=4, deflate=True)
                         shutil.move(temp_pdf_path, pdf_path)
 
-                    # Após a exclusão, remova os itens do `Treeview`
-                    for item in selected_items:
-                        if self.pending_files_tree.exists(item):
-                            self.pending_files_tree.delete(item)
+            # Remover as entradas do relatório
+            report_path = self.analysis_report_path
+            if os.path.exists(report_path):
+                df = pd.read_excel(report_path)
+                for pdf_name, page_indices in pages_to_delete.items():
+                    df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
 
-            # Limpe a visualização do Canvas, se aplicável
+                # Salvar o DataFrame atualizado no arquivo Excel
+                df.to_excel(report_path, index=False)
+
+            # Atualize a Treeview
+            for item in selected_items:
+                self.pending_files_tree.delete(item)
+
             self.clear_canvas()
             messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
-
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível deletar as páginas do PDF: {str(e)}")
+
+    def update_report_after_deletion(self, pdf_name, page_indices):
+        # Atualiza o relatório removendo as entradas correspondentes às páginas deletadas
+        try:
+            df = pd.read_excel(self.analysis_report_path)
+            df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
+            df.to_excel(self.analysis_report_path, index=False)
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao atualizar o relatório: {str(e)}")
 
     def fade_out_animation(self, selected_items):
         """Cria uma animação de fade-out para exclusão de itens"""
@@ -678,47 +691,47 @@ class AnalysisScreen:
 
     def perform_delete_multiple(self, selected_items):
         try:
-            # Armazena os PDFs a serem deletados
-            pdfs_to_remove = set()
+            pages_to_delete = {}
 
-            # Identifica os PDFs a serem removidos
+            # Agrupa as páginas a serem excluídas por PDF
             for item in selected_items:
-                pdf_name, _, _ = self.pending_files_tree.item(item, "values")
-                pdfs_to_remove.add(pdf_name)
+                pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
+                page_index = int(page_info) - 1
 
-            # Itera sobre cada PDF para deletar as páginas correspondentes
-            for pdf_name in pdfs_to_remove:
+                if pdf_name not in pages_to_delete:
+                    pages_to_delete[pdf_name] = []
+                pages_to_delete[pdf_name].append(page_index)
+
+            # Atualiza o arquivo de relatório após a exclusão das páginas
+            report_path = self.analysis_report_path
+            df = pd.read_excel(report_path)
+
+            for pdf_name, page_indices in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
 
                 if os.path.exists(pdf_path):
                     with fitz.open(pdf_path) as pdf_document:
-                        # Apenas uma mensagem para indicar exclusão em andamento
-                        print(f"Deletando páginas do PDF {pdf_name}...")
+                        page_indices = sorted(set(page_indices), reverse=True)
+                        for page_index in page_indices:
+                            if 0 <= page_index < pdf_document.page_count:
+                                pdf_document.delete_page(page_index)
 
-                        # Checa se há mais de uma página, caso contrário não exclui
-                        if pdf_document.page_count > 1:
-                            # Removemos todas as páginas que precisam ser excluídas
-                            # (você pode adicionar lógica adicional aqui se precisar selecionar páginas específicas)
-                            pdf_document.delete_page(0)  # Exemplo: deleta a primeira página como placeholder
-
-                            # Salva o novo arquivo sem as páginas deletadas
+                        if pdf_document.page_count > 0:
                             temp_pdf_path = pdf_path.replace('.pdf', '_temp.pdf')
                             pdf_document.save(temp_pdf_path, garbage=4, deflate=True)
                             shutil.move(temp_pdf_path, pdf_path)
-                            print(f"Páginas deletadas e arquivo atualizado: {pdf_path}")
                         else:
-                            print(f"Não é possível deletar a única página de um documento PDF: {pdf_name}.")
-                            messagebox.showwarning(
-                                "Operação Inválida",
-                                f"Não é possível deletar a única página de {pdf_name}."
-                            )
-                            continue
+                            os.remove(pdf_path)
 
-            # Remove o PDF correspondente da lista Treeview
+                # Remove as páginas deletadas do DataFrame
+                df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
+
+            # Salva o DataFrame atualizado no arquivo Excel
+            df.to_excel(report_path, index=False)
+
             for item in selected_items:
                 self.pending_files_tree.delete(item)
 
-            # Limpa o Canvas após a exclusão
             self.clear_canvas()
             self.show_success_dialog("As páginas selecionadas foram deletadas com sucesso.")
         except Exception as e:
