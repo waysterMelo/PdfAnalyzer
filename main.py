@@ -213,6 +213,17 @@ class PDFAnalyzerGUI:
         # Inicia a interface gráfica
         self.window.mainloop()
 
+    def reset_for_new_analysis(self):
+        """Reinicia a interface para uma nova análise."""
+        # Limpa o diretório selecionado e redefine os componentes da interface
+        self.directory = None
+        self.reset_labels()
+        self.select_label.config(text="Nenhum diretório selecionado")
+        self.analyze_button.config(state="disabled")
+        self.canvas.delete("all")
+        self.circular_progress.set_value(0)
+        self.progress_queue.queue.clear()  # Limpa a fila de progresso
+
     def setup_style(self):
         # Configura o estilo dos componentes da interface gráfica
         style = ttk.Style(self.window)
@@ -223,8 +234,6 @@ class PDFAnalyzerGUI:
         style.map("TButton", background=[("active", "#516B7F")], relief=[("pressed", "ridge"), ("!pressed", "flat")])
 
     def create_widgets(self):
-        # Cria os componentes da interface gráfica
-
         # Criação dos dois frames para dividir a interface em colunas
         main_frame_left = ttk.Frame(self.window, padding="20")
         main_frame_left.pack(side='left', fill='y', expand=False)
@@ -233,10 +242,12 @@ class PDFAnalyzerGUI:
         main_frame_right.pack(side='right', fill='both', expand=True)
 
         # Componentes da coluna esquerda (controles e progresso)
-        header_label = ttk.Label(main_frame_left, text="Selecione um diretório para análise de PDFs:", style="Header.TLabel")
+        header_label = ttk.Label(main_frame_left, text="Selecione um diretório para análise de PDFs:",
+                                 style="Header.TLabel")
         header_label.pack(pady=(0, 20))
 
-        select_button = ttk.Button(main_frame_left, text="Selecionar Diretório", command=self.select_directory, width=30)
+        select_button = ttk.Button(main_frame_left, text="Selecionar Diretório", command=self.select_directory,
+                                   width=30)
         select_button.pack(pady=10)
 
         self.select_label = ttk.Label(main_frame_left, text="Nenhum diretório selecionado", foreground="#a6a6a6")
@@ -256,14 +267,22 @@ class PDFAnalyzerGUI:
         self.pages_total_checked_label = ttk.Label(main_frame_left, text="Total de Páginas Verificadas: 0")
         self.pages_total_checked_label.pack(pady=5)
 
+        # Frame para organizar os botões na mesma linha
         button_frame = ttk.Frame(main_frame_left)
         button_frame.pack(pady=15)
+
         self.open_folder_button = ttk.Button(button_frame, text="Abrir Pasta do Relatório", command=self.open_folder,
                                              width=25)
-        self.open_folder_button.grid(row=0, column=0, padx=10)
+        self.open_folder_button.grid(row=0, column=0, padx=5)
+
         self.open_analise_button = ttk.Button(button_frame, text="Abrir Análises", command=self.open_analysis_screen,
                                               width=25)
-        self.open_analise_button.grid(row=0, column=1, padx=10)
+        self.open_analise_button.grid(row=0, column=1, padx=5)
+
+        # Adicione o botão "Iniciar Nova Análise" ao lado dos outros
+        self.restart_button = ttk.Button(button_frame, text="Iniciar Nova Análise", command=self.reset_for_new_analysis,
+                                         width=25)
+        self.restart_button.grid(row=0, column=2, padx=5)
 
         # Frame do canvas para exibir imagens na coluna direita
         canvas_frame = ttk.Frame(main_frame_right, padding="10", borderwidth=2, relief="ridge", style="TFrame")
@@ -336,17 +355,16 @@ class PDFAnalyzerGUI:
             while True:
                 message = self.progress_queue.get_nowait()
                 if isinstance(message, tuple) and message[0] == "image":
-                    # Exibe a imagem no canvas
                     image = message[1]
                     self.display_image_on_canvas(image)
                 elif isinstance(message, float) or isinstance(message, int):
-                    # Atualiza a barra de progresso
                     self.update_progress(message)
                 elif message == "DONE":
-                    # Mostra mensagem de conclusão
                     self.analyze_button.config(state="normal")
                     messagebox.showinfo("Análise Concluída",
                                         "A análise foi concluída e o relatório foi gerado com sucesso!")
+
+                    break  # Sai do loop ao concluir a análise
         except queue.Empty:
             pass
         # Verifica a fila novamente após 100 ms
@@ -359,7 +377,7 @@ class PDFAnalyzerGUI:
     def update_labels(self, total_pages_checked):
         # Atualiza as labels que exibem informações sobre a análise
         self.pages_blank_after_ocr_label.config(
-            text=f"Página em Branco: {self.analyzer.pages_blank_after_ocr_count}")
+            text=f"Página em Branco / Pouca Informação: {self.analyzer.pages_blank_after_ocr_count}")
         self.pages_total_checked_label.config(
             text=f"Total de Páginas Verificadas: {total_pages_checked}")
         self.pages_low_info_label.config(
@@ -462,6 +480,7 @@ class AnalysisScreen:
         self.window.state('zoomed')
         self.window.configure(bg="#2B3E50")
 
+        # Configurações de estilo
         style = ttk.Style(self.window)
         style.configure("TFrame", background="#2B3E50")
         style.configure("TLabel", background="#2B3E50", foreground="white", font=("Segoe UI", 10))
@@ -469,8 +488,8 @@ class AnalysisScreen:
 
         self.analysis_report_path = analysis_report_path
         self.selected_directory = os.path.dirname(analysis_report_path)
-        print(f"Caminho do relatório de análise: {self.analysis_report_path}")
 
+        # Configuração da interface
         self.header_frame = ttk.Frame(self.window, style="TFrame")
         self.header_frame.pack(pady=10, padx=20, fill='x')
 
@@ -488,14 +507,13 @@ class AnalysisScreen:
         )
         self.date_label.pack(side='right', padx=5)
 
-        # Criar Treeview para exibir arquivos e páginas pendentes como tabela
+        # Treeview para exibir arquivos pendentes
         columns = ("Arquivo PDF", "Página", "Status")
         self.pending_files_tree = ttk.Treeview(
             self.window, columns=columns, show="headings", height=25
         )
         self.pending_files_tree.pack(pady=20, padx=10, fill='y', side='left')
 
-        # Definir cabeçalhos e largura das colunas
         self.pending_files_tree.heading("Arquivo PDF", text="Arquivo PDF")
         self.pending_files_tree.heading("Página", text="Página")
         self.pending_files_tree.heading("Status", text="Status")
@@ -503,6 +521,7 @@ class AnalysisScreen:
         self.pending_files_tree.column("Página", width=50, anchor='center')
         self.pending_files_tree.column("Status", width=190, anchor='center')
 
+        # Frame para visualização de PDF
         self.pdf_view_frame = ttk.Frame(
             self.window, padding="10", borderwidth=2, relief="ridge", style="TFrame"
         )
@@ -514,7 +533,7 @@ class AnalysisScreen:
 
         self.window.bind("<Delete>", self.on_delete_key_press)
 
-        # Botão de deletar dentro do pdf_view_frame
+        # Botão de deletar página
         delete_button = tk.Button(
             self.pdf_view_frame,
             text="Deletar Página Selecionada",
@@ -528,7 +547,7 @@ class AnalysisScreen:
         )
         delete_button.pack(side='bottom', pady=5)
 
-        # Botão para abrir o diretório dos PDFs analisados
+        # Botão para abrir diretório
         open_button = tk.Button(
             self.window,
             text="Abrir Diretório dos PDFs",
@@ -546,69 +565,60 @@ class AnalysisScreen:
         )
         self.loading_label.pack(pady=5)
 
-        print("Chamando load_pending_files...")
         self.load_pending_files()
-
-        # Vincular o evento de seleção do Treeview
         self.pending_files_tree.bind('<<TreeviewSelect>>', self.on_pdf_select)
 
     def on_delete_key_press(self, event):
-        """Chama a função de exclusão quando a tecla Delete for pressionada"""
         self.delete_selected_pdf()
 
     def load_pending_files(self):
-        print("Carregando arquivos pendentes...")
-        if not os.path.exists(self.analysis_report_path):
-            print(f"Erro: Arquivo de relatório não encontrado no caminho: {self.analysis_report_path}")
-            messagebox.showerror("Erro", "Arquivo de relatório não encontrado!")
-            return
-
         try:
             df = pd.read_excel(self.analysis_report_path)
-            print(f"Relatório carregado com sucesso: {len(df)} registros encontrados.")
-            if 'Status' not in df.columns or 'Arquivo PDF' not in df.columns:
-                raise ValueError("Formato do relatório inválido: colunas necessárias não encontradas.")
-            pending_pages = df[(df['Status'] != 'OK') & (df['Status'] != 'Identificado conteúdo após reanálise')][ ['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
+            pending_pages = df[(df['Status'] != 'OK') & (df['Status'] != 'Identificado conteúdo após reanálise')][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
             for _, row in pending_pages.iterrows():
                 pdf_name = row['Arquivo PDF']
                 page_number = row['Página']
                 status = row['Status']
                 self.pending_files_tree.insert("", 'end', values=(pdf_name, page_number, status))
-            print(f"Páginas pendentes encontradas: {len(pending_pages)}")
         except Exception as e:
-            print(f"Erro ao carregar o relatório: {str(e)}")
             messagebox.showerror("Erro", f"Erro ao carregar o relatório: {str(e)}")
 
     def on_pdf_select(self, event):
         print("Item selecionado na Treeview...")
         selected_item = self.pending_files_tree.selection()
+
         if not selected_item:
             print("Nenhum item selecionado.")
             return
-        selected_entry = self.pending_files_tree.item(selected_item, "values")
-        print(f"Entrada selecionada: {selected_entry}")
-        pdf_name, page_info, status = selected_entry
-        self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
-        self.selected_page_index = int(page_info) - 1  # Ajuste para zero-based index
-        print(f"PDF selecionado: {self.selected_pdf}, Página: {self.selected_page_index + 1}, Status: {status}")
-        if os.path.exists(self.selected_pdf):
-            try:
-                print(f"Renderizando página {self.selected_page_index + 1} do PDF {self.selected_pdf}...")
-                self.render_pdf_page(self.selected_pdf, self.selected_page_index + 1)
-            except Exception as e:
-                print(f"Erro ao abrir o PDF: {str(e)}")
-                messagebox.showerror("Erro", f"Não foi possível abrir o PDF: {str(e)}")
-        else:
-            print("Erro: Arquivo PDF não encontrado!")
-            messagebox.showerror("Erro", "Arquivo PDF não encontrado!")
+
+        # Verifique se o item ainda existe
+        try:
+            selected_entry = self.pending_files_tree.item(selected_item, "values")
+            if not selected_entry:
+                raise ValueError("O item selecionado não está mais disponível.")
+
+            pdf_name, page_info, status = selected_entry
+            self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
+            self.selected_page_index = int(page_info) - 1  # Ajuste para zero-based index
+            print(f"PDF selecionado: {self.selected_pdf}, Página: {self.selected_page_index + 1}, Status: {status}")
+
+            if os.path.exists(self.selected_pdf):
+                try:
+                    print(f"Renderizando página {self.selected_page_index + 1} do PDF {self.selected_pdf}...")
+                    self.render_pdf_page(self.selected_pdf, self.selected_page_index + 1)
+                except Exception as e:
+                    print(f"Erro ao abrir o PDF: {str(e)}")
+                    messagebox.showerror("Erro", f"Não foi possível abrir o PDF: {str(e)}")
+            else:
+                print("Erro: Arquivo PDF não encontrado!")
+                messagebox.showerror("Erro", "Arquivo PDF não encontrado!")
+        except (tk.TclError, ValueError) as e:
+            print(f"Erro ao acessar o item: {str(e)}")
 
     def open_pdf_directory(self):
-        print(f"Abrindo diretório dos PDFs: {self.selected_directory}")
-        # Abre o diretório onde estão os PDFs analisados
         if os.path.exists(self.selected_directory):
-            os.startfile(self.selected_directory)  # Somente para Windows
+            os.startfile(self.selected_directory)
         else:
-            print("Erro: Diretório dos PDFs não encontrado!")
             messagebox.showerror("Erro", "Diretório dos PDFs não encontrado!")
 
     def delete_selected_pdf(self):
@@ -621,7 +631,7 @@ class AnalysisScreen:
             pages_to_delete = {}
             for item in selected_items:
                 pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
-                page_index = int(page_info) - 1  # Verificando índice zero-based
+                page_index = int(page_info) - 1  # Índice zero-based
 
                 if pdf_name not in pages_to_delete:
                     pages_to_delete[pdf_name] = []
@@ -629,90 +639,9 @@ class AnalysisScreen:
 
             for pdf_name, page_indices in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
-
                 if os.path.exists(pdf_path):
                     with fitz.open(pdf_path) as pdf_document:
                         for page_index in sorted(page_indices, reverse=True):
-                            if page_index < pdf_document.page_count:
-                                pdf_document.delete_page(page_index)
-                            else:
-                                messagebox.showerror("Erro", f"Página {page_index + 1} não encontrada no documento.")
-                                return
-
-                        temp_pdf_path = pdf_path.replace('.pdf', '_temp.pdf')
-                        pdf_document.save(temp_pdf_path, garbage=4, deflate=True)
-                        shutil.move(temp_pdf_path, pdf_path)
-
-            # Remover as entradas do relatório
-            report_path = self.analysis_report_path
-            if os.path.exists(report_path):
-                df = pd.read_excel(report_path)
-                for pdf_name, page_indices in pages_to_delete.items():
-                    df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
-
-                # Salvar o DataFrame atualizado no arquivo Excel
-                df.to_excel(report_path, index=False)
-
-            # Atualize a Treeview
-            for item in selected_items:
-                self.pending_files_tree.delete(item)
-
-            self.clear_canvas()
-            messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
-        except Exception as e:
-            messagebox.showerror("Erro", f"Não foi possível deletar as páginas do PDF: {str(e)}")
-
-    def update_report_after_deletion(self, pdf_name, page_indices):
-        # Atualiza o relatório removendo as entradas correspondentes às páginas deletadas
-        try:
-            df = pd.read_excel(self.analysis_report_path)
-            df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
-            df.to_excel(self.analysis_report_path, index=False)
-        except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao atualizar o relatório: {str(e)}")
-
-    def fade_out_animation(self, selected_items):
-        """Cria uma animação de fade-out para exclusão de itens"""
-        for item in selected_items:
-            self.pending_files_tree.item(item, tags=("fade_out",))
-
-        self.pending_files_tree.tag_configure("fade_out", background="#ffcccc")
-
-        def fade():
-            for item in selected_items:
-                current_color = self.pending_files_tree.item(item, "tags")[0]
-                new_color = "#f2f2f2" if current_color == "#ffcccc" else "#ffcccc"
-                self.pending_files_tree.item(item, tags=(new_color,))
-
-            # Continua a animação por um tempo ou para quando a cor de fundo estiver clara
-            self.window.after(300, lambda: self.perform_delete_multiple(selected_items))
-
-        self.window.after(300, fade)
-
-    def perform_delete_multiple(self, selected_items):
-        try:
-            pages_to_delete = {}
-
-            # Agrupa as páginas a serem excluídas por PDF
-            for item in selected_items:
-                pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
-                page_index = int(page_info) - 1
-
-                if pdf_name not in pages_to_delete:
-                    pages_to_delete[pdf_name] = []
-                pages_to_delete[pdf_name].append(page_index)
-
-            # Atualiza o arquivo de relatório após a exclusão das páginas
-            report_path = self.analysis_report_path
-            df = pd.read_excel(report_path)
-
-            for pdf_name, page_indices in pages_to_delete.items():
-                pdf_path = os.path.join(self.selected_directory, pdf_name)
-
-                if os.path.exists(pdf_path):
-                    with fitz.open(pdf_path) as pdf_document:
-                        page_indices = sorted(set(page_indices), reverse=True)
-                        for page_index in page_indices:
                             if 0 <= page_index < pdf_document.page_count:
                                 pdf_document.delete_page(page_index)
 
@@ -723,54 +652,41 @@ class AnalysisScreen:
                         else:
                             os.remove(pdf_path)
 
-                # Remove as páginas deletadas do DataFrame
-                df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
+            # Atualizar o relatório e a Treeview para manter as páginas restantes com seus números originais
+            report_path = self.analysis_report_path
+            df = pd.read_excel(report_path)
 
-            # Salva o DataFrame atualizado no arquivo Excel
+            for pdf_name, page_indices in pages_to_delete.items():
+                df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
+                # Não alterar os números das páginas restantes, apenas manter as existentes
+
             df.to_excel(report_path, index=False)
 
+            # Remover apenas os itens deletados da Treeview
             for item in selected_items:
                 self.pending_files_tree.delete(item)
 
             self.clear_canvas()
-            self.show_success_dialog("As páginas selecionadas foram deletadas com sucesso.")
+            messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
         except Exception as e:
-            print(f"Erro ao deletar as páginas do PDF: {str(e)}")
             messagebox.showerror("Erro", f"Não foi possível deletar as páginas do PDF: {str(e)}")
-        finally:
-            self.loading_label.config(text="")
-
-    def clear_canvas(self):
-        """Limpa o Canvas após a exclusão"""
-        self.pdf_canvas.delete("all")
-        self.pdf_canvas.image = None  # Remove a referência da imagem para garantir que o canvas esteja vazio
 
     def render_pdf_page(self, pdf_path, page_number):
-        print(f"Renderizando página {page_number} do PDF {pdf_path}...")
-
         try:
-            # Configurar o caminho para o PDFium (adicione aqui para garantir que sempre esteja configurado)
-            os.environ["PDF2IMAGE_PDFIUM_PATH"] = r"C:/pdfium/pdfium.dll"  # Altere o caminho conforme necessário
-
-            # Usando pdf2image para converter o PDF em uma imagem
+            os.environ["PDF2IMAGE_PDFIUM_PATH"] = r"C:/pdfium/pdfium.dll"
             from pdf2image import convert_from_path
 
-            # Converte a página especificada do PDF para uma imagem
             images = convert_from_path(
                 pdf_path,
                 first_page=page_number,
                 last_page=page_number,
                 dpi=200
             )
-
             if not images:
-                print(f"Erro: Página {page_number} não foi encontrada no PDF.")
                 messagebox.showerror("Erro", f"Número de página {page_number} está fora do intervalo.")
                 return
 
-            pil_image = images[0]  # A única imagem convertida da página selecionada
-
-            # Ajustar a imagem ao canvas, conforme seu código atual
+            pil_image = images[0]
             canvas_width = self.pdf_canvas.winfo_width()
             canvas_height = self.pdf_canvas.winfo_height()
             image_ratio = pil_image.width / pil_image.height
@@ -783,35 +699,26 @@ class AnalysisScreen:
                 new_height = canvas_height
                 new_width = int(canvas_height * image_ratio)
 
-            # Redimensionar a imagem mantendo a proporção
             pil_image = pil_image.resize((new_width, new_height), Image.LANCZOS)
-
-            # Converter para ImageTk.PhotoImage
             self.pdf_image = ImageTk.PhotoImage(pil_image)
-            print("Imagem da página renderizada com sucesso.")
 
-            # Limpar o canvas antes de adicionar a nova imagem
             self.pdf_canvas.delete("all")
-
-            # Calcular a posição para centralizar a imagem no canvas
             x = (canvas_width - new_width) // 2
             y = (canvas_height - new_height) // 2
-
-            # Exibir a imagem no canvas
             self.pdf_canvas.create_image(x, y, anchor="nw", image=self.pdf_image)
-            print(f"Imagem posicionada no Canvas em: ({x}, {y})")
-
-            # Manter a referência da imagem para evitar coleta de lixo
             self.pdf_canvas.image = self.pdf_image
-
         except Exception as e:
-            print(f"Erro ao renderizar a página do PDF: {str(e)}")
             messagebox.showerror("Erro", f"Erro ao renderizar a página do PDF: {str(e)}")
 
+    def clear_canvas(self):
+        self.pdf_canvas.delete("all")
+        self.pdf_canvas.image = None
+
     def center_image(self, event):
-        print("Centralizando imagem no Canvas...")
+        """Centraliza a imagem no Canvas quando ele é redimensionado."""
         self.pdf_canvas.delete('all')
         if hasattr(self, 'pdf_image'):
+            # Centraliza a imagem no meio do Canvas
             self.pdf_canvas.create_image(
                 self.pdf_canvas.winfo_width() // 2,
                 self.pdf_canvas.winfo_height() // 2,
@@ -819,13 +726,6 @@ class AnalysisScreen:
                 image=self.pdf_image,
                 tags='pdf_image'
             )
-
-    def confirm_delete(self, dialog, selected_items):
-        """Confirma e executa a exclusão"""
-        dialog.destroy()  # Fecha o diálogo de confirmação
-        self.loading_label.config(text="Deletando páginas, por favor aguarde...")
-        delete_thread = threading.Thread(target=self.perform_delete_multiple, args=(selected_items,))
-        delete_thread.start()
 
 class PDFAnalyzer:
     def __init__(self, min_text_length=10, pixel_threshold=0.989, language='eng+por'):
