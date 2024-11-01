@@ -8,6 +8,7 @@ import queue
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog
@@ -223,6 +224,7 @@ class PDFAnalyzerGUI:
         self.canvas.delete("all")
         self.circular_progress.set_value(0)
         self.progress_queue.queue.clear()  # Limpa a fila de progresso
+        self.open_analise_button.config(state="disabled")  # Desabilita o botão
 
     def setup_style(self):
         # Configura o estilo dos componentes da interface gráfica
@@ -276,7 +278,7 @@ class PDFAnalyzerGUI:
         self.open_folder_button.grid(row=0, column=0, padx=5)
 
         self.open_analise_button = ttk.Button(button_frame, text="Abrir Análises", command=self.open_analysis_screen,
-                                              width=25)
+                                              width=25, state="disabled")
         self.open_analise_button.grid(row=0, column=1, padx=5)
 
         # Adicione o botão "Iniciar Nova Análise" ao lado dos outros
@@ -361,9 +363,15 @@ class PDFAnalyzerGUI:
                     self.update_progress(message)
                 elif message == "DONE":
                     self.analyze_button.config(state="normal")
+                    # Verifica se há páginas que necessitam de revisão
+                    if self.analyzer.pages_blank_after_ocr_count == 0 and self.analyzer.pages_low_info_count == 0:
+                        # Nenhuma página para revisar, desabilita o botão
+                        self.open_analise_button.config(state="disabled")
+                    else:
+                        # Há páginas para revisar, habilita o botão
+                        self.open_analise_button.config(state="normal")
                     messagebox.showinfo("Análise Concluída",
                                         "A análise foi concluída e o relatório foi gerado com sucesso!")
-
                     break  # Sai do loop ao concluir a análise
         except queue.Empty:
             pass
@@ -641,6 +649,7 @@ class AnalysisScreen:
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
                 if os.path.exists(pdf_path):
                     with fitz.open(pdf_path) as pdf_document:
+                        # Ordena as páginas a serem deletadas em ordem reversa
                         for page_index in sorted(page_indices, reverse=True):
                             if 0 <= page_index < pdf_document.page_count:
                                 pdf_document.delete_page(page_index)
@@ -652,24 +661,44 @@ class AnalysisScreen:
                         else:
                             os.remove(pdf_path)
 
-            # Atualizar o relatório e a Treeview para manter as páginas restantes com seus números originais
-            report_path = self.analysis_report_path
-            df = pd.read_excel(report_path)
+                    # Atualizar o relatório e a Treeview
+                    self.update_report_and_treeview(pdf_name, page_indices)
+                    self.clear_canvas()
 
-            for pdf_name, page_indices in pages_to_delete.items():
-                df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin([p + 1 for p in page_indices])))]
-                # Não alterar os números das páginas restantes, apenas manter as existentes
-
-            df.to_excel(report_path, index=False)
-
-            # Remover apenas os itens deletados da Treeview
-            for item in selected_items:
-                self.pending_files_tree.delete(item)
-
-            self.clear_canvas()
             messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
         except Exception as e:
             messagebox.showerror("Erro", f"Não foi possível deletar as páginas do PDF: {str(e)}")
+
+    def update_report_and_treeview(self, pdf_name, deleted_page_indices):
+        report_path = self.analysis_report_path
+        df = pd.read_excel(report_path)
+
+        # Atualizar DataFrame
+        deleted_page_numbers = [p + 1 for p in deleted_page_indices]
+        df = df[df['Arquivo PDF'] == pdf_name]
+        df = df[~df['Página'].isin(deleted_page_numbers)]  # Remove as páginas deletadas
+
+        # Recalcular números das páginas
+        df['Página'] = df['Página'].apply(lambda x: x - sum(p < x for p in deleted_page_numbers))
+
+        # Atualizar DataFrame geral
+        df_full = pd.read_excel(report_path)
+        df_full = df_full[df_full['Arquivo PDF'] != pdf_name]
+        df_full = pd.concat([df_full, df], ignore_index=True)
+
+        df_full.to_excel(report_path, index=False)
+
+        # Atualizar Treeview
+        for item in self.pending_files_tree.get_children():
+            item_pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
+            if item_pdf_name == pdf_name:
+                page_index = int(page_info) - 1
+                if page_index in deleted_page_indices:
+                    self.pending_files_tree.delete(item)
+                else:
+                    # Atualizar número da página
+                    new_page_number = int(page_info) - sum(p < int(page_info) - 1 for p in deleted_page_indices)
+                    self.pending_files_tree.item(item, values=(item_pdf_name, new_page_number, status))
 
     def render_pdf_page(self, pdf_path, page_number):
         try:
@@ -855,105 +884,105 @@ class PDFAnalyzer:
         return status, white_pixel_percentage, ocr_performed, quantidade_caracteres
 
 class ReportGenerator:
-    def __init__(self):
-        print("Inicializando ReportGenerator...")
-        self.wb = Workbook()
-        self.ws = self.wb.active
-        self.ws.title = "PDF Analysis Report"
-        print("Workbook e Worksheet inicializados.")
-        # Adicionando as novas colunas 'OCR Feito' e 'Texto Extraído'
-        self.headers = ["Arquivo PDF", "Página", "Status", "Porcentagem de Pixels Brancos", "OCR Feito", "Texto Extraído"]
-        self.ws.append(self.headers)
-        print(f"Worksheet inicializada com cabeçalhos: {self.headers}")
+        def __init__(self):
+            print("Inicializando ReportGenerator...")
+            self.wb = Workbook()
+            self.ws = self.wb.active
+            self.ws.title = "PDF Analysis Report"
+            print("Workbook e Worksheet inicializados.")
+            # Adicionando as novas colunas 'OCR Feito' e 'Texto Extraído'
+            self.headers = ["Arquivo PDF", "Página", "Status", "Porcentagem de Pixels Brancos", "OCR Feito", "Texto Extraído"]
+            self.ws.append(self.headers)
+            print(f"Worksheet inicializada com cabeçalhos: {self.headers}")
 
-    def add_record(self, pdf_name, page_num, status, white_pixel_percentage, ocr_performed, extracted_text):
-        try:
-            print(f"Adicionando registro: PDF Name={pdf_name}, Página={page_num}, Status={status}, Porcentagem de Pixels Brancos={white_pixel_percentage}")
-            # Converter ocr_performed para 'Sim' ou 'Não'
-            ocr_feito = 'Sim' if ocr_performed else 'Não'
-            row = [
-                pdf_name,
-                page_num,
-                status,
-                f"{white_pixel_percentage:.2%}",
-                ocr_feito,
-                extracted_text
-            ]
-            self.ws.append(row)
-            print(f"Linha adicionada na planilha: {row}")
-
-            # Destacar linha em vermelho se o status for "Precisa de Atenção"
-            if status == "Precisa de Atenção":
-                print("Status 'Precisa de Atenção' detectado. Destacando a linha em vermelho.")
-                fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
-                for col_idx in range(1, len(row) + 1):
-                    cell = self.ws.cell(row=self.ws.max_row, column=col_idx)
-                    cell.fill = fill
-                    print(f"Célula {cell.coordinate} destacada em vermelho.")
-
-            print("Registro adicionado com sucesso.")
-        except Exception as e:
-            print(f"Erro ao adicionar registro: {e}")
-
-    def finalize(self, output_path):
-        print("Finalizando o relatório...")
-
-        # Garantir que o diretório de destino existe
-        dir_path = os.path.dirname(output_path)
-        print(f"Verificando existência do diretório: {dir_path}")
-        if not os.path.exists(dir_path):
+        def add_record(self, pdf_name, page_num, status, white_pixel_percentage, ocr_performed, extracted_text):
             try:
-                os.makedirs(dir_path)
-                print(f"Diretório criado: {dir_path}")
-            except OSError as e:
-                print(f"Erro ao criar o diretório: {e}")
-                return
-        else:
-            print(f"Diretório já existe: {dir_path}")
+                print(f"Adicionando registro: PDF Name={pdf_name}, Página={page_num}, Status={status}, Porcentagem de Pixels Brancos={white_pixel_percentage}")
+                # Converter ocr_performed para 'Sim' ou 'Não'
+                ocr_feito = 'Sim' if ocr_performed else 'Não'
+                row = [
+                    pdf_name,
+                    page_num,
+                    status,
+                    f"{white_pixel_percentage:.2%}",
+                    ocr_feito,
+                    extracted_text
+                ]
+                self.ws.append(row)
+                print(f"Linha adicionada na planilha: {row}")
 
-        # Estilo da tabela e ajuste das colunas
-        try:
-            max_row = self.ws.max_row
-            max_col = self.ws.max_column
-            table_ref = f"A1:{get_column_letter(max_col)}{max_row}"
-            print(f"Criando tabela com referência: {table_ref}")
+                # Destacar linha em vermelho se o status for "Precisa de Atenção"
+                if status == "Precisa de Atenção":
+                    print("Status 'Precisa de Atenção' detectado. Destacando a linha em vermelho.")
+                    fill = PatternFill(start_color="FF0000", end_color="FF0000", fill_type="solid")
+                    for col_idx in range(1, len(row) + 1):
+                        cell = self.ws.cell(row=self.ws.max_row, column=col_idx)
+                        cell.fill = fill
+                        print(f"Célula {cell.coordinate} destacada em vermelho.")
 
-            # Gerar um nome de tabela único para evitar conflitos
-            table_name = f"PDFAnalysisTable_{int(datetime.now().timestamp())}"
+                print("Registro adicionado com sucesso.")
+            except Exception as e:
+                print(f"Erro ao adicionar registro: {e}")
 
-            tab = Table(displayName=table_name, ref=table_ref)
-            style = TableStyleInfo(
-                name="TableStyleMedium9",
-                showFirstColumn=False,
-                showLastColumn=False,
-                showRowStripes=True,
-                showColumnStripes=True
-            )
-            tab.tableStyleInfo = style
-            self.ws.add_table(tab)
-            print("Tabela criada com estilo aplicado.")
+        def finalize(self, output_path):
+            print("Finalizando o relatório...")
 
-            for col in self.ws.columns:
-                max_length = 0
-                column = col[0].column
-                column_letter = get_column_letter(column)
-                print(f"Ajustando largura da coluna {column_letter}...")
-                for cell in col:
-                    cell_value_length = len(str(cell.value))
-                    print(f"Célula {cell.coordinate} valor: '{cell.value}', comprimento: {cell_value_length}")
-                    max_length = max(max_length, cell_value_length)
-                adjusted_width = max_length + 2
-                self.ws.column_dimensions[column_letter].width = adjusted_width
-                print(f"Largura da coluna {column_letter} ajustada para {adjusted_width}.")
+            # Garantir que o diretório de destino existe
+            dir_path = os.path.dirname(output_path)
+            print(f"Verificando existência do diretório: {dir_path}")
+            if not os.path.exists(dir_path):
+                try:
+                    os.makedirs(dir_path)
+                    print(f"Diretório criado: {dir_path}")
+                except OSError as e:
+                    print(f"Erro ao criar o diretório: {e}")
+                    return
+            else:
+                print(f"Diretório já existe: {dir_path}")
 
-            # Salvar o relatório
-            print(f"Salvando o relatório no caminho: {output_path}")
-            self.wb.save(output_path)
-            print(f"Relatório salvo em: {output_path}")
+            # Estilo da tabela e ajuste das colunas
+            try:
+                max_row = self.ws.max_row
+                max_col = self.ws.max_column
+                table_ref = f"A1:{get_column_letter(max_col)}{max_row}"
+                print(f"Criando tabela com referência: {table_ref}")
 
-        except Exception as e:
-            print(f"Erro ao salvar o relatório: {e}")
-            messagebox.showerror("Erro", f"Erro ao salvar o relatório: {str(e)}")
+                # Gerar um nome de tabela único para evitar conflitos
+                table_name = f"PDFAnalysisTable_{int(datetime.now().timestamp())}"
+
+                tab = Table(displayName=table_name, ref=table_ref)
+                style = TableStyleInfo(
+                    name="TableStyleMedium9",
+                    showFirstColumn=False,
+                    showLastColumn=False,
+                    showRowStripes=True,
+                    showColumnStripes=True
+                )
+                tab.tableStyleInfo = style
+                self.ws.add_table(tab)
+                print("Tabela criada com estilo aplicado.")
+
+                for col in self.ws.columns:
+                    max_length = 0
+                    column = col[0].column
+                    column_letter = get_column_letter(column)
+                    print(f"Ajustando largura da coluna {column_letter}...")
+                    for cell in col:
+                        cell_value_length = len(str(cell.value))
+                        print(f"Célula {cell.coordinate} valor: '{cell.value}', comprimento: {cell_value_length}")
+                        max_length = max(max_length, cell_value_length)
+                    adjusted_width = max_length + 2
+                    self.ws.column_dimensions[column_letter].width = adjusted_width
+                    print(f"Largura da coluna {column_letter} ajustada para {adjusted_width}.")
+
+                # Salvar o relatório
+                print(f"Salvando o relatório no caminho: {output_path}")
+                self.wb.save(output_path)
+                print(f"Relatório salvo em: {output_path}")
+
+            except Exception as e:
+                print(f"Erro ao salvar o relatório: {e}")
+                messagebox.showerror("Erro", f"Erro ao salvar o relatório: {str(e)}")
 
 class TesseractConfig:
     def __init__(self, tessdata_path, tesseract_cmd):
