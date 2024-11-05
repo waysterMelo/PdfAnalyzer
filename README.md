@@ -20,12 +20,15 @@ Certifique-se de que as seguintes bibliotecas estão instaladas:
 
 Como Usar
 Clone o repositório para sua máquina local:
+
 ![image](https://github.com/user-attachments/assets/e5ac6482-99b5-4c4a-9ae8-f014e316505c)
 
 Navegue até o diretório do projeto:
+
 ![image](https://github.com/user-attachments/assets/4196bedf-436e-4213-85a2-4825ec9417ee)
 
 Execute o script principal:
+
 ![image](https://github.com/user-attachments/assets/9dbba518-2e0a-4856-92ae-4a1cc95e8979)
 
 Utilize a interface gráfica para carregar arquivos PDF e visualizar as informações extraídas.
