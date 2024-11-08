@@ -627,6 +627,38 @@ class AnalysisScreen:
         else:
             messagebox.showerror("Erro", "Diretório dos PDFs não encontrado!")
 
+    def confirm_delete_page(self, page_number):
+        result = [False]  # Usamos uma lista para capturar o resultado
+
+        confirm_win = tk.Toplevel()
+        confirm_win.title("Confirmação")
+        confirm_win.geometry("300x150")
+        confirm_win.resizable(False, False)
+        confirm_win.grab_set()  # Torna a janela modal
+
+        label = tk.Label(confirm_win, text=f"Deseja excluir a página {page_number}?")
+        label.pack(pady=20)
+
+        button_frame = tk.Frame(confirm_win)
+        button_frame.pack(pady=10)
+
+        def on_yes():
+            result[0] = True
+            confirm_win.destroy()
+
+        def on_no():
+            result[0] = False
+            confirm_win.destroy()
+
+        yes_button = tk.Button(button_frame, text="Sim", command=on_yes, bg="green", fg="white", width=10)
+        yes_button.pack(side='left', padx=10)
+
+        no_button = tk.Button(button_frame, text="Não", command=on_no, bg="red", fg="white", width=10)
+        no_button.pack(side='right', padx=10)
+
+        confirm_win.wait_window()
+        return result[0]
+
     def delete_selected_pdf(self):
         try:
             selected_items = self.pending_files_tree.selection()
@@ -639,9 +671,13 @@ class AnalysisScreen:
                 pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
                 page_index = int(page_info) - 1  # Índice zero-based
 
+                # Confirmação para cada página
+                if not self.confirm_delete_page(int(page_info)):
+                    continue  # Pula para a próxima se o usuário escolher "Não"
+
                 if pdf_name not in pages_to_delete:
-                    pages_to_delete[pdf_name] = set()
-                pages_to_delete[pdf_name].add(page_index)
+                    pages_to_delete[pdf_name] = []
+                pages_to_delete[pdf_name].append(page_index)
 
             for pdf_name, page_indices in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
@@ -649,7 +685,7 @@ class AnalysisScreen:
                     # Abrir o PDF
                     pdf_document = fitz.open(pdf_path)
 
-                    # Deletar páginas em ordem reversa
+                    # Deletar páginas em ordem reversa para não alterar os índices
                     for page_index in sorted(page_indices, reverse=True):
                         if 0 <= page_index < pdf_document.page_count:
                             pdf_document.delete_page(page_index)
@@ -677,15 +713,18 @@ class AnalysisScreen:
         report_path = self.analysis_report_path
         df = pd.read_excel(report_path)
 
-        # Obter os números das páginas deletadas (1-based)
-        deleted_page_numbers = [p + 1 for p in deleted_page_indices]
+        # Ordenar os índices das páginas deletadas
+        deleted_page_indices = sorted(deleted_page_indices)
 
         # Remover as páginas deletadas do DataFrame
-        df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin(deleted_page_numbers)))]
+        for page_index in deleted_page_indices:
+            page_number = page_index + 1  # Número da página (1-based)
+            df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'] == page_number))]
 
         # Ajustar os números das páginas remanescentes
-        for deleted_page in sorted(deleted_page_numbers):
-            df.loc[(df['Arquivo PDF'] == pdf_name) & (df['Página'] > deleted_page), 'Página'] -= 1
+        for page_index in deleted_page_indices:
+            page_number = page_index + 1
+            df.loc[(df['Arquivo PDF'] == pdf_name) & (df['Página'] > page_number), 'Página'] -= 1
 
         # Salvar o DataFrame atualizado
         df.to_excel(report_path, index=False)
