@@ -592,14 +592,11 @@ class AnalysisScreen:
             messagebox.showerror("Erro", f"Erro ao carregar o relatório: {str(e)}")
 
     def on_pdf_select(self, event):
-        print("Item selecionado na Treeview...")
         selected_item = self.pending_files_tree.selection()
 
         if not selected_item:
-            print("Nenhum item selecionado.")
             return
 
-        # Verifique se o item ainda existe
         try:
             selected_entry = self.pending_files_tree.item(selected_item, "values")
             if not selected_entry:
@@ -607,13 +604,14 @@ class AnalysisScreen:
 
             pdf_name, page_info, status = selected_entry
             self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
-            self.selected_page_index = int(page_info) - 1  # Ajuste para zero-based index
-            print(f"PDF selecionado: {self.selected_pdf}, Página: {self.selected_page_index + 1}, Status: {status}")
+            page_number = int(page_info)  # Número da página (1-based)
+            self.selected_page_index = page_number - 1  # Índice da página (0-based)
+            print(
+                f"PDF selecionado: {self.selected_pdf}, Página: {page_number}, Índice real: {self.selected_page_index}, Status: {status}")
 
             if os.path.exists(self.selected_pdf):
                 try:
-                    print(f"Renderizando página {self.selected_page_index + 1} do PDF {self.selected_pdf}...")
-                    self.render_pdf_page(self.selected_pdf, self.selected_page_index + 1)
+                    self.render_pdf_page(self.selected_pdf, page_number)
                 except Exception as e:
                     print(f"Erro ao abrir o PDF: {str(e)}")
                     messagebox.showerror("Erro", f"Não foi possível abrir o PDF: {str(e)}")
@@ -642,63 +640,59 @@ class AnalysisScreen:
                 page_index = int(page_info) - 1  # Índice zero-based
 
                 if pdf_name not in pages_to_delete:
-                    pages_to_delete[pdf_name] = []
-                pages_to_delete[pdf_name].append(page_index)
+                    pages_to_delete[pdf_name] = set()
+                pages_to_delete[pdf_name].add(page_index)
 
             for pdf_name, page_indices in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
                 if os.path.exists(pdf_path):
-                    with fitz.open(pdf_path) as pdf_document:
-                        # Ordena as páginas a serem deletadas em ordem reversa
-                        for page_index in sorted(page_indices, reverse=True):
-                            if 0 <= page_index < pdf_document.page_count:
-                                pdf_document.delete_page(page_index)
+                    # Abrir o PDF
+                    pdf_document = fitz.open(pdf_path)
 
-                        if pdf_document.page_count > 0:
-                            temp_pdf_path = pdf_path.replace('.pdf', '_temp.pdf')
-                            pdf_document.save(temp_pdf_path, garbage=4, deflate=True)
-                            shutil.move(temp_pdf_path, pdf_path)
-                        else:
-                            os.remove(pdf_path)
+                    # Deletar páginas em ordem reversa
+                    for page_index in sorted(page_indices, reverse=True):
+                        if 0 <= page_index < pdf_document.page_count:
+                            pdf_document.delete_page(page_index)
+
+                    # Salvar o PDF modificado em um arquivo temporário
+                    temp_pdf_path = pdf_path + ".tmp"
+                    pdf_document.save(temp_pdf_path)
+                    pdf_document.close()
+
+                    # Substituir o PDF original pelo modificado
+                    os.remove(pdf_path)
+                    os.rename(temp_pdf_path, pdf_path)
 
                     # Atualizar o relatório e a Treeview
                     self.update_report_and_treeview(pdf_name, page_indices)
                     self.clear_canvas()
+                else:
+                    messagebox.showerror("Erro", f"O arquivo PDF {pdf_name} não foi encontrado.")
 
             messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
         except Exception as e:
-            messagebox.showerror("Erro", f"Não foi possível deletar as páginas do PDF: {str(e)}")
+            messagebox.showerror("Erro", f"Ocorreu um erro ao deletar as páginas: {str(e)}")
 
     def update_report_and_treeview(self, pdf_name, deleted_page_indices):
         report_path = self.analysis_report_path
         df = pd.read_excel(report_path)
 
-        # Atualizar DataFrame
+        # Obter os números das páginas deletadas (1-based)
         deleted_page_numbers = [p + 1 for p in deleted_page_indices]
-        df = df[df['Arquivo PDF'] == pdf_name]
-        df = df[~df['Página'].isin(deleted_page_numbers)]  # Remove as páginas deletadas
 
-        # Recalcular números das páginas
-        df['Página'] = df['Página'].apply(lambda x: x - sum(p < x for p in deleted_page_numbers))
+        # Remover as páginas deletadas do DataFrame
+        df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'].isin(deleted_page_numbers)))]
 
-        # Atualizar DataFrame geral
-        df_full = pd.read_excel(report_path)
-        df_full = df_full[df_full['Arquivo PDF'] != pdf_name]
-        df_full = pd.concat([df_full, df], ignore_index=True)
+        # Ajustar os números das páginas remanescentes
+        for deleted_page in sorted(deleted_page_numbers):
+            df.loc[(df['Arquivo PDF'] == pdf_name) & (df['Página'] > deleted_page), 'Página'] -= 1
 
-        df_full.to_excel(report_path, index=False)
+        # Salvar o DataFrame atualizado
+        df.to_excel(report_path, index=False)
 
-        # Atualizar Treeview
-        for item in self.pending_files_tree.get_children():
-            item_pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
-            if item_pdf_name == pdf_name:
-                page_index = int(page_info) - 1
-                if page_index in deleted_page_indices:
-                    self.pending_files_tree.delete(item)
-                else:
-                    # Atualizar número da página
-                    new_page_number = int(page_info) - sum(p < int(page_info) - 1 for p in deleted_page_indices)
-                    self.pending_files_tree.item(item, values=(item_pdf_name, new_page_number, status))
+        # Recarregar a Treeview
+        self.pending_files_tree.delete(*self.pending_files_tree.get_children())
+        self.load_pending_files()
 
     def render_pdf_page(self, pdf_path, page_number):
         try:
