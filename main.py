@@ -229,7 +229,7 @@ class PDFAnalyzerGUI:
     def setup_style(self):
         # Configura o estilo dos componentes da interface gráfica
         style = ttk.Style(self.window)
-        style.configure("TFrame", background="#0D1B2A")  # Azul mais escuro para melhor contraste
+        style.configure("TFrame", background="#0e0d2a")  # Azul mais escuro para melhor contraste
         style.configure("TLabel", background="#121212", foreground="white", font=("Segoe UI", 10))
         style.configure("Header.TLabel", foreground="#F0F0F0", font=("Segoe UI", 10, "bold"))
         style.configure("TButton", background="#374956", foreground="black", font=("Segoe UI", 10, "bold"), padding=10)
@@ -490,7 +490,7 @@ class AnalysisScreen:
 
         # Configurações de estilo
         style = ttk.Style(self.window)
-        style.configure("TFrame", background="#2B3E50")
+        style.configure("TFrame", background="#0e0d2a")
         style.configure("TLabel", background="#2B3E50", foreground="white", font=("Segoe UI", 10))
         style.configure("Header.TLabel", foreground="#ECECEC", font=("Segoe UI", 12, "bold"))
 
@@ -580,6 +580,12 @@ class AnalysisScreen:
         self.delete_selected_pdf()
 
     def load_pending_files(self):
+        # Limpar o Treeview
+        self.pending_files_tree.delete(*self.pending_files_tree.get_children())
+
+        # Limpar dados de análise (caso use uma lista ou dicionário para armazenar temporariamente)
+        self.analyzed_pages = []  # Exemplo de uma lista para armazenar dados temporários de análise
+
         try:
             df = pd.read_excel(self.analysis_report_path)
             pending_pages = df[(df['Status'] != 'OK') & (df['Status'] != 'Identificado conteúdo após reanálise')][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
@@ -631,6 +637,8 @@ class AnalysisScreen:
         result = [False]  # Usamos uma lista para capturar o resultado
 
         confirm_win = tk.Toplevel()
+        confirm_win.transient(self.window)  # Define a janela de confirmação como dependente da janela principal
+        confirm_win.grab_set()  # Torna a janela modal, bloqueando interações com outras janelas
         confirm_win.title("Confirmação")
         confirm_win.geometry("300x150")
         confirm_win.resizable(False, False)
