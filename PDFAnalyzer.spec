@@ -1,14 +1,8 @@
-# PDFAnalyzer.spec atualizado
-
 import os
-import spellchecker  # Corrigido: importar o módulo spellchecker
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
-# Localiza o caminho do arquivo 'pt.json.gz' dentro do pacote 'spellchecker'
-resource_path = os.path.join(os.path.dirname(spellchecker.__file__), 'resources', 'pt.json.gz')
-
 # Lista de arquivos de dados necessários
-datas = collect_data_files('spellchecker') + [('img/logo.webp', 'img')]
+datas = [('img/logo.webp', 'img')]
 
 block_cipher = None
 
