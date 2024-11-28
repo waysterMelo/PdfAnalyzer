@@ -1,39 +1,46 @@
-PDF Analyzer
-O PDF Analyzer é uma ferramenta poderosa desenvolvida em Python para extrair, processar e analisar dados de arquivos PDF de forma eficiente. Utilizando bibliotecas robustas como Pandas, OpenCV e Fitz (PyMuPDF), o sistema permite a extração de textos e imagens de PDFs e fornece uma interface amigável para a visualização e manipulação dos dados.
-
-Funcionalidades Principais
-Extração de texto e imagens: Processa PDFs e extrai conteúdos, incluindo texto formatado e imagens incorporadas.
-Análise de dados: Utiliza a biblioteca Pandas para estruturar os dados extraídos e permitir uma análise mais detalhada.
-Interface interativa: Desenvolvida com tkinter, a interface do usuário é intuitiva e facilita o uso da aplicação.
-Manipulação de imagens: Suporta processamento de imagens com OpenCV e PIL (Pillow), permitindo aplicar filtros e ajustes.
-Suporte a arquivos Excel: A funcionalidade de exportação de dados para planilhas Excel está disponível, facilitando a apresentação e manipulação de relatórios.
+Resumo do Projeto
+Nome do Projeto: PDF Analyzer
+Descrição: Uma aplicação desktop com interface gráfica que permite analisar documentos PDF em diretórios selecionados. O sistema detecta páginas em branco, processa OCR (Optical Character Recognition) para reclassificação e gera relatórios detalhados no formato Excel.
 Tecnologias Utilizadas
-Python 3.x
-Tkinter para a interface gráfica.
-Fitz (PyMuPDF) para manipulação de PDFs.
-Pandas para análise e organização de dados.
-OpenCV e Pillow para processamento de imagens.
-OpenPyXL para manipulação de planilhas Excel.
-Pré-requisitos
-Certifique-se de que as seguintes bibliotecas estão instaladas:
-![image](https://github.com/user-attachments/assets/74d96c96-c833-4f0e-8250-07fb69e03efd)
+Linguagem e Frameworks:
 
-Como Usar
-Clone o repositório para sua máquina local:
+Python: Base principal para a lógica de processamento.
+Tkinter: Para criação da interface gráfica, com temas customizados para melhor experiência do usuário.
+Pillow: Manipulação e otimização de imagens.
+OpenPyXL: Criação e estilização de relatórios no formato Excel.
+Bibliotecas Avançadas:
 
-![image](https://github.com/user-attachments/assets/e5ac6482-99b5-4c4a-9ae8-f014e316505c)
+Pytesseract: Implementação de OCR para extrair texto de imagens e reclassificar páginas.
+Fitz (PyMuPDF): Manipulação de documentos PDF e extração de páginas.
+Análise de Imagens:
 
-Navegue até o diretório do projeto:
+OpenCV: Processamento de imagens em escala de cinza e aplicação de binarização adaptativa para detectar páginas em branco.
+Segurança:
 
-![image](https://github.com/user-attachments/assets/4196bedf-436e-4213-85a2-4825ec9417ee)
+HMAC-SHA256: Para validação de licenças e integridade dos arquivos.
+Assinaturas Digitais: Para proteger dados críticos no arquivo de licença.
+Relatórios Automatizados:
 
-Execute o script principal:
+Criação de relatórios detalhados em Excel com tabelas estilizadas, destacando páginas que necessitam de revisão.
+Funcionalidades Principais
+Interface Intuitiva:
 
-![image](https://github.com/user-attachments/assets/9dbba518-2e0a-4856-92ae-4a1cc95e8979)
+Seleção de diretórios com arquivos PDF.
+Exibição do progresso da análise em uma barra circular animada.
+Processamento Avançado de PDFs:
 
-Utilize a interface gráfica para carregar arquivos PDF e visualizar as informações extraídas.
-Contribuições
-Contribuições são bem-vindas! Sinta-se à vontade para fazer um fork do projeto, criar uma branch com suas melhorias e enviar um pull request.
+Identificação de páginas em branco ou ruidosas.
+Aplicação de OCR para extração de texto de páginas problemáticas.
+Reclassificação de páginas com base no conteúdo extraído.
+Relatórios Detalhados:
 
-Licença
-Este projeto é distribuído sob a licença MIT. Consulte o arquivo LICENSE para mais informações.
+Geração automática de relatórios Excel, incluindo campos como status, porcentagem de pixels brancos, texto extraído e necessidade de revisão.
+Destaque em vermelho para páginas que exigem atenção.
+Gestão de Licenças:
+
+Verificação de validade com duração configurável.
+Proteção contra manipulações com assinaturas digitais.
+Diferenciais
+Automação Completa: Desde a análise dos PDFs até a geração dos relatórios, reduzindo trabalho manual.
+Precisão e Eficiência: Combinação de OCR e análise de imagens para garantir resultados confiáveis.
+Interface Amigável: Foco na usabilidade, permitindo que usuários com pouca experiência técnica utilizem a ferramenta.
