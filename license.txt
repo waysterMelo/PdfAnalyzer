@@ -1,0 +1,1 @@
+{"activation_time": "2024-12-02T14:03:16.101869", "duracao": 172800, "signature": "e18db6df2fc78deac990a38b0cb20bd6de43ecc44d2d266171be44befd42c443"}

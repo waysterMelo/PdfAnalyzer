@@ -1016,28 +1016,35 @@ class ReportGenerator:
         else:
             print(f"Diretório já existe: {dir_path}")
 
-        # Aplica estilo de tabela e ajusta a largura das colunas
         try:
+            # Obter o número de linhas e colunas na planilha
             max_row = self.ws.max_row
             max_col = self.ws.max_column
-            table_ref = f"A1:{get_column_letter(max_col)}{max_row}"  # Define a referência para a tabela
-            print(f"Criando tabela com referência: {table_ref}")
+            print(f"Máximo de linhas: {max_row}, Máximo de colunas: {max_col}")
 
-            # Gera um nome único para a tabela com base no timestamp atual
-            table_name = f"PDFAnalysisTable_{int(datetime.now().timestamp())}"
+            # Verifica se há dados suficientes para criar uma tabela
+            if max_row > 1 and max_col > 1:
+                table_ref = f"A1:{get_column_letter(max_col)}{max_row}"  # Define a referência para a tabela
+                print(f"Criando tabela com referência: {table_ref}")
 
-            # Cria e estiliza a tabela
-            tab = Table(displayName=table_name, ref=table_ref)
-            style = TableStyleInfo(
-                name="TableStyleMedium9",
-                showFirstColumn=False,
-                showLastColumn=False,
-                showRowStripes=True,
-                showColumnStripes=True
-            )
-            tab.tableStyleInfo = style
-            self.ws.add_table(tab)  # Adiciona a tabela à planilha
-            print("Tabela criada com estilo aplicado.")
+                # Cria e estiliza a tabela
+                tab = Table(displayName="PDFAnalysisTable", ref=table_ref)
+                style = TableStyleInfo(
+                    name="TableStyleMedium9",
+                    showFirstColumn=False,
+                    showLastColumn=False,
+                    showRowStripes=True,
+                    showColumnStripes=True
+                )
+                tab.tableStyleInfo = style
+
+                try:
+                    self.ws.add_table(tab)  # Adiciona a tabela à planilha
+                    print("Tabela criada com sucesso.")
+                except ValueError as ve:
+                    print(f"Erro ao criar tabela: {ve}. Possivelmente a tabela já existe ou a referência é inválida.")
+            else:
+                print("Dados insuficientes para criar tabela. Pulando etapa de tabela.")
 
             # Ajusta a largura de cada coluna para melhorar a legibilidade
             for col in self.ws.columns:
@@ -1048,9 +1055,9 @@ class ReportGenerator:
 
                 # Percorre as células para calcular o comprimento máximo
                 for cell in col:
-                    cell_value_length = len(str(cell.value))  # Comprimento do valor da célula
-                    print(f"Célula {cell.coordinate} valor: '{cell.value}', comprimento: {cell_value_length}")
-                    max_length = max(max_length, cell_value_length)
+                    if cell.value:
+                        cell_value_length = len(str(cell.value))  # Comprimento do valor da célula
+                        max_length = max(max_length, cell_value_length)
 
                 # Ajusta a largura com base no comprimento máximo dos dados da coluna
                 adjusted_width = max_length + 2
@@ -1064,7 +1071,13 @@ class ReportGenerator:
 
         except Exception as e:
             print(f"Erro ao salvar o relatório: {e}")
-            messagebox.showerror("Erro", f"Erro ao salvar o relatório: {str(e)}")  # Exibe uma mensagem de erro
+            messagebox.showerror("Erro", f"Erro ao salvar o relatório: {str(e)}")
+        finally:
+            # Certifique-se de fechar o Workbook para evitar problemas
+            self.wb.close()
+            print("Workbook fechado.")
+
+
 #
 class TesseractConfig:
     def __init__(self, tessdata_path, tesseract_cmd):
