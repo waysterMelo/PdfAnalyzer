@@ -45,7 +45,6 @@ Automação Completa: Desde a análise dos PDFs até a geração dos relatórios
 Precisão e Eficiência: Combinação de OCR e análise de imagens para garantir resultados confiáveis.
 Interface Amigável: Foco na usabilidade, permitindo que usuários com pouca experiência técnica utilizem a ferramenta.
 
-TELAS
 ![image](https://github.com/user-attachments/assets/acb51f6f-9185-4a37-a3e9-518d0438cbc4)
 
 ![image](https://github.com/user-attachments/assets/1d768853-9b5a-411c-8950-4f9b5dfcb6d2)
