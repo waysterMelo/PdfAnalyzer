@@ -44,3 +44,13 @@ Diferenciais
 Automação Completa: Desde a análise dos PDFs até a geração dos relatórios, reduzindo trabalho manual.
 Precisão e Eficiência: Combinação de OCR e análise de imagens para garantir resultados confiáveis.
 Interface Amigável: Foco na usabilidade, permitindo que usuários com pouca experiência técnica utilizem a ferramenta.
+
+TELAS
+![image](https://github.com/user-attachments/assets/acb51f6f-9185-4a37-a3e9-518d0438cbc4)
+
+![image](https://github.com/user-attachments/assets/1d768853-9b5a-411c-8950-4f9b5dfcb6d2)
+
+![image](https://github.com/user-attachments/assets/015dd10d-77c4-4e22-b3ff-1346c8dd24e8)
+
+![image](https://github.com/user-attachments/assets/c6f628eb-fad1-4812-938f-d6143c01f8d0)
+
