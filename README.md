@@ -49,7 +49,5 @@ Interface Amigável: Foco na usabilidade, permitindo que usuários com pouca exp
 
 ![image](https://github.com/user-attachments/assets/1d768853-9b5a-411c-8950-4f9b5dfcb6d2)
 
-![image](https://github.com/user-attachments/assets/015dd10d-77c4-4e22-b3ff-1346c8dd24e8)
-
 ![image](https://github.com/user-attachments/assets/c6f628eb-fad1-4812-938f-d6143c01f8d0)
 
