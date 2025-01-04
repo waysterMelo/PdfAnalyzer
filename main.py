@@ -488,6 +488,30 @@ class PDFAnalyzerGUI:
         self.analyzer.pages_low_info_count = 0
         self.analyzer.pages_blank_count = 0
 
+import tkinter as tk
+from tkinter import ttk, messagebox
+import os
+import pandas as pd
+import fitz  # PyMuPDF
+from PIL import Image, ImageTk
+import sys
+
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+import os
+import pandas as pd
+import fitz  # PyMuPDF
+from PIL import Image, ImageTk
+import threading
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+import os
+import pandas as pd
+import fitz  # PyMuPDF
+from PIL import Image, ImageTk
+import sys
+
 class AnalysisScreen:
     def __init__(self, master, analysis_report_path):
         print("Inicializando AnalysisScreen...")
@@ -502,10 +526,18 @@ class AnalysisScreen:
         style.configure("TLabel", background="#2B3E50", foreground="white", font=("Segoe UI", 10))
         style.configure("Header.TLabel", foreground="#ECECEC", font=("Segoe UI", 12, "bold"))
 
+        # Tenta deixar o Scrollbar cinza escuro
+        style.configure(
+            "Vertical.TScrollbar",
+            troughcolor="grey25",    # Cor do “trilho”
+            background="grey50",     # Cor interna do scrollbar
+            arrowcolor="white"       # Cor das setinhas
+        )
+
         self.analysis_report_path = analysis_report_path
         self.selected_directory = os.path.dirname(analysis_report_path)
 
-        # Configuração da interface
+        # Cabeçalho
         self.header_frame = ttk.Frame(self.window, style="TFrame")
         self.header_frame.pack(pady=10, padx=20, fill='x')
 
@@ -523,11 +555,27 @@ class AnalysisScreen:
         )
         self.date_label.pack(side='right', padx=5)
 
-        # Treeview para exibir arquivos pendentes
+        # =================== TREEVIEW e SCROLLBAR ===================
         columns = ("Arquivo PDF", "Página", "Status")
+        # selectmode="extended" permite multiseleção arrastando ou via Shift/Ctrl
         self.pending_files_tree = ttk.Treeview(
-            self.window, columns=columns, show="headings", height=25
+            self.window,
+            columns=columns,
+            show="headings",
+            height=25,
+            selectmode="extended"
         )
+
+        # Scrollbar vertical ao lado do Treeview
+        scrollbar = ttk.Scrollbar(
+            self.window,
+            orient="vertical",
+            command=self.pending_files_tree.yview,
+            style="Vertical.TScrollbar"  # Estilo definido acima
+        )
+        scrollbar.pack(side="left", fill="y")
+
+        self.pending_files_tree.configure(yscrollcommand=scrollbar.set)
         self.pending_files_tree.pack(pady=20, padx=10, fill='y', side='left')
 
         self.pending_files_tree.heading("Arquivo PDF", text="Arquivo PDF")
@@ -537,16 +585,22 @@ class AnalysisScreen:
         self.pending_files_tree.column("Página", width=50, anchor='center')
         self.pending_files_tree.column("Status", width=190, anchor='center')
 
-        # Frame para visualização de PDF
+        # =============== FRAME DE VISUALIZAÇÃO DO PDF ===============
         self.pdf_view_frame = ttk.Frame(
-            self.window, padding="10", borderwidth=2, relief="ridge", style="TFrame"
+            self.window,
+            padding="10",
+            borderwidth=2,
+            relief="ridge",
+            style="TFrame"
         )
         self.pdf_view_frame.pack(pady=10, padx=10, side='right', fill='both', expand=True)
 
+        # Canvas para exibir a página do PDF
         self.pdf_canvas = tk.Canvas(self.pdf_view_frame, bg="#2B3E50")
         self.pdf_canvas.pack(expand=True, fill='both')
         self.pdf_canvas.bind('<Configure>', self.center_image)
 
+        # Atalho do teclado (Delete) para deletar página
         self.window.bind("<Delete>", self.on_delete_key_press)
 
         # Botão de deletar página
@@ -571,7 +625,7 @@ class AnalysisScreen:
         )
         open_button.pack(pady=10)
 
-        # Label de loading
+        # Label de loading (opcional)
         self.loading_label = tk.Label(
             self.window,
             text="",
@@ -581,22 +635,29 @@ class AnalysisScreen:
         )
         self.loading_label.pack(pady=5)
 
+        # Carrega as páginas pendentes no Treeview
         self.load_pending_files()
+
+        # Evento ao selecionar item no Treeview (atualiza PDF no Canvas)
         self.pending_files_tree.bind('<<TreeviewSelect>>', self.on_pdf_select)
 
-    def on_delete_key_press(self, event):
-        self.delete_selected_pdf()
-
+    # ---------------------------------------------------
+    #                CARREGAR ITENS
+    # ---------------------------------------------------
     def load_pending_files(self):
         # Limpar o Treeview
         self.pending_files_tree.delete(*self.pending_files_tree.get_children())
 
-        # Limpar dados de análise (caso use uma lista ou dicionário para armazenar temporariamente)
-        self.analyzed_pages = []  # Exemplo de uma lista para armazenar dados temporários de análise
+        # Exemplo de lista para armazenar dados temporários de análise
+        self.analyzed_pages = []
 
         try:
             df = pd.read_excel(self.analysis_report_path)
-            pending_pages = df[(df['Status'] != 'OK') & (df['Status'] != 'Identificado conteúdo após reanálise')][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
+            pending_pages = df[
+                (df['Status'] != 'OK')
+                & (df['Status'] != 'Identificado conteúdo após reanálise')
+            ][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
+
             for _, row in pending_pages.iterrows():
                 pdf_name = row['Arquivo PDF']
                 page_number = row['Página']
@@ -605,6 +666,9 @@ class AnalysisScreen:
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao carregar o relatório: {str(e)}")
 
+    # ---------------------------------------------------
+    #             EVENTO DE SELEÇÃO NO TREE
+    # ---------------------------------------------------
     def on_pdf_select(self, event):
         selected_item = self.pending_files_tree.selection()
 
@@ -612,7 +676,8 @@ class AnalysisScreen:
             return
 
         try:
-            selected_entry = self.pending_files_tree.item(selected_item, "values")
+            # Pega o primeiro item selecionado (caso o usuário selecione vários)
+            selected_entry = self.pending_files_tree.item(selected_item[0], "values")
             if not selected_entry:
                 raise ValueError("O item selecionado não está mais disponível.")
 
@@ -620,8 +685,9 @@ class AnalysisScreen:
             self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
             page_number = int(page_info)  # Número da página (1-based)
             self.selected_page_index = page_number - 1  # Índice da página (0-based)
-            print(
-                f"PDF selecionado: {self.selected_pdf}, Página: {page_number}, Índice real: {self.selected_page_index}, Status: {status}")
+
+            print(f"PDF selecionado: {self.selected_pdf}, Página: {page_number}, "
+                  f"Índice real: {self.selected_page_index}, Status: {status}")
 
             if os.path.exists(self.selected_pdf):
                 try:
@@ -635,96 +701,87 @@ class AnalysisScreen:
         except (tk.TclError, ValueError) as e:
             print(f"Erro ao acessar o item: {str(e)}")
 
+    # ---------------------------------------------------
+    #              AÇÃO DO TECLADO (DELETE)
+    # ---------------------------------------------------
+    def on_delete_key_press(self, event):
+        self.delete_selected_pdf()
+
+    # ---------------------------------------------------
+    #       ABRE DIRETÓRIO ONDE FICAM OS PDFs
+    # ---------------------------------------------------
     def open_pdf_directory(self):
         if os.path.exists(self.selected_directory):
             os.startfile(self.selected_directory)
         else:
             messagebox.showerror("Erro", "Diretório dos PDFs não encontrado!")
 
-    def confirm_delete_page(self, page_number):
-        result = [False]  # Usamos uma lista para capturar o resultado
-
-        confirm_win = tk.Toplevel()
-        confirm_win.transient(self.window)  # Define a janela de confirmação como dependente da janela principal
-        confirm_win.grab_set()  # Torna a janela modal, bloqueando interações com outras janelas
-        confirm_win.title("Confirmação")
-        confirm_win.geometry("300x150")
-        confirm_win.resizable(False, False)
-        confirm_win.grab_set()  # Torna a janela modal
-
-        label = tk.Label(confirm_win, text=f"Deseja excluir a página {page_number}?")
-        label.pack(pady=20)
-
-        button_frame = tk.Frame(confirm_win)
-        button_frame.pack(pady=10)
-
-        def on_yes():
-            result[0] = True
-            confirm_win.destroy()
-
-        def on_no():
-            result[0] = False
-            confirm_win.destroy()
-
-        yes_button = tk.Button(button_frame, text="Sim", command=on_yes, bg="green", fg="white", width=10)
-        yes_button.pack(side='left', padx=10)
-
-        no_button = tk.Button(button_frame, text="Não", command=on_no, bg="red", fg="white", width=10)
-        no_button.pack(side='right', padx=10)
-
-        confirm_win.wait_window()
-        return result[0]
-
+    # ---------------------------------------------------
+    #     FUNÇÃO DELETAR VÁRIAS PÁGINAS DE UMA VEZ
+    # ---------------------------------------------------
     def delete_selected_pdf(self):
+        """Exclui as páginas selecionadas de todos os PDFs que foram marcados."""
         try:
             selected_items = self.pending_files_tree.selection()
             if not selected_items:
                 messagebox.showwarning("Aviso", "Nenhum PDF selecionado!")
                 return
 
+            # Monta a lista dos PDFs/páginas que o usuário selecionou
             pages_to_delete = {}
+            text_files_to_delete = []  # String para exibir todos ao usuário
             for item in selected_items:
                 pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
-                page_index = int(page_info) - 1  # Índice zero-based
-
-                # Confirmação para cada página
-                if not self.confirm_delete_page(int(page_info)):
-                    continue  # Pula para a próxima se o usuário escolher "Não"
+                page_index = int(page_info) - 1
 
                 if pdf_name not in pages_to_delete:
                     pages_to_delete[pdf_name] = []
                 pages_to_delete[pdf_name].append(page_index)
 
+                text_files_to_delete.append(f"{pdf_name} - Página {page_info}")
+
+            # Mostra ao usuário tudo o que será deletado:
+            files_list_msg = "\n".join(text_files_to_delete)
+            resposta = messagebox.askyesno(
+                "Confirmar Exclusão",
+                f"Você selecionou para excluir:\n\n{files_list_msg}\n\nDeseja realmente deletar TODOS?"
+            )
+            if not resposta:
+                return
+
+            # Prossegue com a exclusão de tudo
             for pdf_name, page_indices in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
                 if os.path.exists(pdf_path):
-                    # Abrir o PDF
                     pdf_document = fitz.open(pdf_path)
 
-                    # Deletar páginas em ordem reversa para não alterar os índices
+                    # Deleta páginas em ordem reversa
                     for page_index in sorted(page_indices, reverse=True):
                         if 0 <= page_index < pdf_document.page_count:
                             pdf_document.delete_page(page_index)
 
-                    # Salvar o PDF modificado em um arquivo temporário
+                    # Salva PDF temporário
                     temp_pdf_path = pdf_path + ".tmp"
                     pdf_document.save(temp_pdf_path)
                     pdf_document.close()
 
-                    # Substituir o PDF original pelo modificado
+                    # Substitui o PDF antigo
                     os.remove(pdf_path)
                     os.rename(temp_pdf_path, pdf_path)
 
-                    # Atualizar o relatório e a Treeview
+                    # Atualiza relatório e Treeview
                     self.update_report_and_treeview(pdf_name, page_indices)
                     self.clear_canvas()
                 else:
                     messagebox.showerror("Erro", f"O arquivo PDF {pdf_name} não foi encontrado.")
 
-            messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
+            messagebox.showinfo("Sucesso", "Todos os itens selecionados foram deletados com sucesso.")
         except Exception as e:
             messagebox.showerror("Erro", f"Ocorreu um erro ao deletar as páginas: {str(e)}")
 
+    # ---------------------------------------------------
+    #    ATUALIZAR RELATÓRIO EXCEL E ATUALIZAR TREEVIEW
+    # ---------------------------------------------------
     def update_report_and_treeview(self, pdf_name, deleted_page_indices):
         report_path = self.analysis_report_path
         df = pd.read_excel(report_path)
@@ -734,13 +791,16 @@ class AnalysisScreen:
 
         # Remover as páginas deletadas do DataFrame
         for page_index in deleted_page_indices:
-            page_number = page_index + 1  # Número da página (1-based)
+            page_number = page_index + 1
             df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'] == page_number))]
 
-        # Ajustar os números das páginas remanescentes
+        # Ajustar números das páginas remanescentes
         for page_index in deleted_page_indices:
             page_number = page_index + 1
-            df.loc[(df['Arquivo PDF'] == pdf_name) & (df['Página'] > page_number), 'Página'] -= 1
+            df.loc[
+                (df['Arquivo PDF'] == pdf_name) & (df['Página'] > page_number),
+                'Página'
+            ] -= 1
 
         # Salvar o DataFrame atualizado
         df.to_excel(report_path, index=False)
@@ -749,6 +809,9 @@ class AnalysisScreen:
         self.pending_files_tree.delete(*self.pending_files_tree.get_children())
         self.load_pending_files()
 
+    # ---------------------------------------------------
+    #        RENDERIZAR PÁGINA DO PDF NO CANVAS
+    # ---------------------------------------------------
     def render_pdf_page(self, pdf_path, page_number):
         try:
             os.environ["PDF2IMAGE_PDFIUM_PATH"] = r"C:/pdfium/pdfium.dll"
@@ -788,15 +851,19 @@ class AnalysisScreen:
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao renderizar a página do PDF: {str(e)}")
 
+    # ---------------------------------------------------
+    #          LIMPAR CANVAS (PDF FECHADO/DELETADO)
+    # ---------------------------------------------------
     def clear_canvas(self):
         self.pdf_canvas.delete("all")
         self.pdf_canvas.image = None
 
+    # ---------------------------------------------------
+    #         CENTRALIZAR IMAGEM AO REDIMENSIONAR
+    # ---------------------------------------------------
     def center_image(self, event):
-        """Centraliza a imagem no Canvas quando ele é redimensionado."""
         self.pdf_canvas.delete('all')
         if hasattr(self, 'pdf_image'):
-            # Centraliza a imagem no meio do Canvas
             self.pdf_canvas.create_image(
                 self.pdf_canvas.winfo_width() // 2,
                 self.pdf_canvas.winfo_height() // 2,
@@ -804,6 +871,7 @@ class AnalysisScreen:
                 image=self.pdf_image,
                 tags='pdf_image'
             )
+
 
 class PDFAnalyzer:
     def __init__(self, min_text_length=10, pixel_threshold=0.989, language='eng+por'):
