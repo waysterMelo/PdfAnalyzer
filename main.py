@@ -488,30 +488,6 @@ class PDFAnalyzerGUI:
         self.analyzer.pages_low_info_count = 0
         self.analyzer.pages_blank_count = 0
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-import os
-import pandas as pd
-import fitz  # PyMuPDF
-from PIL import Image, ImageTk
-import sys
-
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
-import os
-import pandas as pd
-import fitz  # PyMuPDF
-from PIL import Image, ImageTk
-import threading
-
-import tkinter as tk
-from tkinter import ttk, messagebox
-import os
-import pandas as pd
-import fitz  # PyMuPDF
-from PIL import Image, ImageTk
-import sys
-
 class AnalysisScreen:
     def __init__(self, master, analysis_report_path):
         print("Inicializando AnalysisScreen...")
@@ -871,7 +847,6 @@ class AnalysisScreen:
                 image=self.pdf_image,
                 tags='pdf_image'
             )
-
 
 class PDFAnalyzer:
     def __init__(self, min_text_length=10, pixel_threshold=0.989, language='eng+por'):
