@@ -322,7 +322,7 @@ class PDFAnalyzerGUI:
 
     def analyze_pdfs_in_directory(self, output_xlsx):
         # Analisa todos os PDFs no diretório selecionado e gera um relatório
-        self.reset_labels();
+        self.reset_labels()
         pdf_files = [os.path.join(self.directory, f) for f in os.listdir(self.directory) if f.lower().endswith('.pdf')]
         total_pages = sum(fitz.open(pdf_file).page_count for pdf_file in pdf_files)  # Calcula o total de páginas
         total_pages_processed = 0
@@ -538,7 +538,9 @@ class AnalysisScreen:
         self.pending_files_tree.heading("Arquivo PDF", text="Arquivo PDF")
         self.pending_files_tree.heading("Página", text="Página")
         self.status_sort_reverse = False
+        self.page_sort_reverse = False
         self.pending_files_tree.heading("Status", text="Status", command=self.sort_by_status)
+        self.pending_files_tree.heading("Página", text="Página", command=self.sort_by_page)
 
         self.pending_files_tree.column("Arquivo PDF", width=200)
         self.pending_files_tree.column("Página", width=50, anchor='center')
@@ -760,6 +762,18 @@ class AnalysisScreen:
         self.pending_files_tree.heading("Status", text=f"Status {arrow}")
         self.status_sort_reverse = not self.status_sort_reverse
 
+    def sort_by_page(self):
+        items = list(self.pending_files_tree.get_children())
+        data = [(self.pending_files_tree.item(item, "values"), item) for item in items]
+        data.sort(key=lambda x: int(x[0][1]), reverse=self.page_sort_reverse)
+
+        for index, (values, item) in enumerate(data):
+            self.pending_files_tree.move(item, '', index)
+
+        arrow = "▼" if self.page_sort_reverse else "▲"
+        self.pending_files_tree.heading("Página", text=f"Página {arrow}")
+        self.page_sort_reverse = not self.page_sort_reverse
+
     def render_pdf_page(self, pdf_path, page_number):
         try:
             os.environ["PDF2IMAGE_PDFIUM_PATH"] = r"C:/pdfium/pdfium.dll"
@@ -816,7 +830,7 @@ class AnalysisScreen:
             )
 
 class PDFAnalyzer:
-    def __init__(self, min_text_length=10, pixel_threshold=0.989, language='eng+por'):
+    def __init__(self, min_text_length=10, pixel_threshold=0.98, language='eng+por'):
         print("Inicializando PDFAnalyzer...")
         self.min_text_length = min_text_length
         self.pixel_threshold = pixel_threshold
@@ -836,17 +850,26 @@ class PDFAnalyzer:
 
         print("Verificando se a imagem é em branco ou ruidosa...")
 
-        # Recorta 5% de cada lado para remover bordas potencialmente ruidosas
+        # Recorta 10% de cada lado e da parte inferior, mas apenas 5% da parte superior
         width, height = image.size
-        crop_percent = 0.10
-        left = int(width * crop_percent)
-        right = int(width * (1 - crop_percent))
-        cropped_image = image.crop((left, 0, right, height))
-        print(f"Imagem cortada para remover bordas: {left}px à {right}px")
+        horizontal_crop_percent = 0.10  # Percentual de corte para os lados
+        top_crop_percent = 0.02  # Percentual de corte para a parte superior
+        bottom_crop_percent = 0.05  # Percentual de corte para a parte inferior
+
+        # Calcula as coordenadas para recorte
+        left = int(width * horizontal_crop_percent)
+        right = int(width * (1 - horizontal_crop_percent))
+        top = int(height * top_crop_percent)
+        bottom = int(height * (1 - bottom_crop_percent))
+
+        # Aplica o recorte
+        cropped_image = image.crop((left, top, right, bottom))
+        print(f"Imagem cortada para remover bordas: {left}px à {right}px (horizontal), {top}px à {bottom}px (vertical)")
 
         # Converte a imagem recortada para escala de cinza
         gray_image = cv2.cvtColor(np.array(cropped_image), cv2.COLOR_RGB2GRAY)
         print("Imagem convertida para escala de cinza.")
+
 
         # Aplica limiarização adaptativa para binarizar a imagem
         binary_image = cv2.adaptiveThreshold(
