@@ -834,7 +834,7 @@ class AnalysisScreen:
             )
 
 class PDFAnalyzer:
-    def __init__(self, min_text_length=10, pixel_threshold=0.98, language='eng+por'):
+    def __init__(self, min_text_length=10, pixel_threshold=0.97, language='eng+por'):
         print("Inicializando PDFAnalyzer...")
         self.min_text_length = min_text_length
         self.pixel_threshold = pixel_threshold
@@ -851,14 +851,13 @@ class PDFAnalyzer:
         print("PDFAnalyzer inicializado com sucesso.")
 
     def is_blank_or_noisy(self, image):
-
         print("Verificando se a imagem é em branco ou ruidosa...")
 
         # Recorta 10% de cada lado e da parte inferior, mas apenas 5% da parte superior
         width, height = image.size
-        horizontal_crop_percent = 0.10  # Percentual de corte para os lados
-        top_crop_percent = 0.02  # Percentual de corte para a parte superior
-        bottom_crop_percent = 0.05  # Percentual de corte para a parte inferior
+        horizontal_crop_percent = 0.15
+        top_crop_percent = 0.05
+        bottom_crop_percent = 0.10
 
         # Calcula as coordenadas para recorte
         left = int(width * horizontal_crop_percent)
@@ -868,12 +867,10 @@ class PDFAnalyzer:
 
         # Aplica o recorte
         cropped_image = image.crop((left, top, right, bottom))
-        print(f"Imagem cortada para remover bordas: {left}px à {right}px (horizontal), {top}px à {bottom}px (vertical)")
+        print(f"Imagem cortada para remover bordas: {left}px à {right}px, {top}px à {bottom}px")
 
-        # Converte a imagem recortada para escala de cinza
+        # Converte para escala de cinza
         gray_image = cv2.cvtColor(np.array(cropped_image), cv2.COLOR_RGB2GRAY)
-        print("Imagem convertida para escala de cinza.")
-
 
         # Aplica limiarização adaptativa para binarizar a imagem
         binary_image = cv2.adaptiveThreshold(
@@ -885,54 +882,35 @@ class PDFAnalyzer:
         )
         print("Binarização adaptativa aplicada.")
 
-        # Calcula a porcentagem de pixels brancos na imagem binarizada
+        # Calcula a porcentagem de pixels brancos
         white_pixel_percentage = np.mean(binary_image == 255)
         print(f"Proporção de pixels brancos: {white_pixel_percentage:.2%}")
 
-        # Determina se a página é considerada em branco com base na porcentagem de pixels brancos
+        # Determina se é uma página em branco
         is_blank = white_pixel_percentage >= self.pixel_threshold
         print(f"Imagem é em branco: {is_blank}")
 
-        return is_blank, white_pixel_percentage, cropped_image
+        return is_blank, white_pixel_percentage, cropped_image, binary_image
 
-    def perform_ocr_and_reclassify(self, cropped_image):
-
+    def perform_ocr_and_reclassify(self, binary_image):
         print("Iniciando o processo de OCR e reclassificação...")
 
         try:
-            # Aplica filtro mediano para reduzir o ruído na imagem
-            cropped_image = cropped_image.filter(ImageFilter.MedianFilter(size=3))
-            print("Filtro mediano aplicado para reduzir ruído.")
+            # Converte a imagem binarizada de volta para o formato PIL (se necessário para OCR)
+            binary_pil_image = Image.fromarray(binary_image)
 
-            # Aumenta o contraste e a nitidez para melhorar a precisão do OCR
-            cropped_image = ImageEnhance.Contrast(cropped_image).enhance(3.0)
-            print("Contraste da imagem aumentado.")
-            cropped_image = ImageEnhance.Sharpness(cropped_image).enhance(2.5)
-            print("Nitidez da imagem aumentada.")
+            # Configuração do Tesseract para OCR
+            custom_config = r'--oem 3 --psm 6'
+            text = pytesseract.image_to_string(binary_pil_image, lang=self.language, config=custom_config)
+            print("OCR realizado com Tesseract.")
 
-            # Ajusta o DPI e converte para preto e branco para melhores resultados de OCR
-            with io.BytesIO() as output:
-                cropped_image.save(output, format="PNG", dpi=(300, 300))
-                output.seek(0)
-                with Image.open(output) as image_dpi:
-                    image_bw = image_dpi.convert('L')
-                    image_bw = ImageEnhance.Contrast(image_bw).enhance(2.0)
-                    # Converte a imagem para binária (preto e branco) usando um limiar
-                    image_bw = image_bw.point(lambda x: 0 if x < 140 else 255, '1')
-                    print("Imagem convertida para preto e branco para OCR.")
-                    # Configuração do Tesseract para OCR
-                    custom_config = r'--oem 3 --psm 6'
-                    text = pytesseract.image_to_string(image_bw, lang=self.language, config=custom_config)
-                    print("OCR realizado com Tesseract.")
-
-            # Limpa o texto extraído removendo caracteres indesejados, mas preserva espaços para correção
+            # Limpa o texto extraído
             text = re.sub(r'[^A-Za-z0-9À-ÿ\s]', ' ', text)
-            # Substitui múltiplos espaços por um único espaço
             text = re.sub(r'\s+', ' ', text).strip()
             print(f"Texto extraído pelo OCR: {text[:50]}... (truncado)" if len(
                 text) > 50 else f"Texto extraído pelo OCR: {text}")
 
-            # Determina se o OCR foi bem-sucedido com base no comprimento do texto limpo
+            # Determina se o OCR foi bem-sucedido
             ocr_successful = len(text) >= self.min_text_length
             print(f"OCR foi bem-sucedido: {ocr_successful}")
             return ocr_successful, text
@@ -942,16 +920,14 @@ class PDFAnalyzer:
             return False, ""
 
     def analyze_page(self, img):
-        # Analisa a imagem de uma única página do PDF
-        is_blank, white_pixel_percentage, cropped_img = self.is_blank_or_noisy(img)
+        is_blank, white_pixel_percentage, cropped_img, binary_img = self.is_blank_or_noisy(img)
         ocr_performed = False
         status = "OK"
-
         quantidade_caracteres = 0
 
         if is_blank:
             self.pages_blank_count += 1
-            ocr_successful, extracted_text = self.perform_ocr_and_reclassify(cropped_img)
+            ocr_successful, extracted_text = self.perform_ocr_and_reclassify(binary_img)
             ocr_performed = True
 
             if extracted_text:
@@ -960,9 +936,9 @@ class PDFAnalyzer:
             if (ocr_successful or quantidade_caracteres >= 20) and white_pixel_percentage <= 0.995:
                 status = "Identificado conteúdo após reanálise"
                 self.pages_ocr_analyzed_count += 1
-            elif quantidade_caracteres >= 5 and white_pixel_percentage >= self.pixel_threshold:
+            elif quantidade_caracteres >= 6 and white_pixel_percentage >= self.pixel_threshold:
                 status = "Necessidade de revisão"
-                self.pages_low_info_count += 1  # Atualiza o contador para esse status
+                self.pages_low_info_count += 1
             else:
                 status = "Página em branco ou pouca info."
                 self.pages_blank_after_ocr_count += 1
