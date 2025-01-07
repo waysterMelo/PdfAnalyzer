@@ -6,9 +6,7 @@ import json
 import os
 import queue
 import re
-import shutil
 import subprocess
-import tempfile
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog
@@ -584,92 +582,16 @@ class AnalysisScreen:
         )
         open_button.pack(pady=10)
 
-        # Label de loading
-        self.loading_label = tk.Label(
-            self.window,
-            text="",
-            bg="#2B3E50",
-            fg="white",
-            font=("Segoe UI", 10, "bold")
-        )
-        self.loading_label.pack(pady=5)
-
         self.load_pending_files()
         self.pending_files_tree.bind('<<TreeviewSelect>>', self.on_pdf_select)
 
         # Atalho CTRL + A para selecionar tudo
         self.window.bind("<Control-a>", self.select_all_items)
 
-    def on_delete_key_press(self, event):
-        self.delete_selected_pdf()
-
-    def select_all_items(self, event):
-        all_items = self.pending_files_tree.get_children()
-        self.pending_files_tree.selection_set(all_items)
-
-    def load_pending_files(self):
-        # Limpar o Treeview
-        self.pending_files_tree.delete(*self.pending_files_tree.get_children())
-        self.analyzed_pages = []
-
-        try:
-            df = pd.read_excel(self.analysis_report_path)
-            pending_pages = df[
-                (df['Status'] != 'OK') &
-                (df['Status'] != 'Identificado conteúdo após reanálise')
-            ][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
-
-            # ========== Ordena as páginas em ordem decrescente ==========
-            pending_pages = pending_pages.sort_values(by="Página", ascending=False)
-
-            for _, row in pending_pages.iterrows():
-                pdf_name = row['Arquivo PDF']
-                page_number = row['Página']
-                status = row['Status']
-                self.pending_files_tree.insert("", 'end', values=(pdf_name, page_number, status))
-        except Exception as e:
-            messagebox.showerror("Erro", f"Erro ao carregar o relatório: {str(e)}")
-
-    def on_pdf_select(self, event):
-        selected_item = self.pending_files_tree.selection()
-
-        if not selected_item:
-            return
-
-        try:
-            # Se tiver mais de um selecionado, exibe apenas o PDF do primeiro
-            first_item = selected_item[0]
-            selected_entry = self.pending_files_tree.item(first_item, "values")
-
-            if not selected_entry:
-                raise ValueError("O item selecionado não está mais disponível.")
-
-            pdf_name, page_info, status = selected_entry
-            self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
-            page_number = int(page_info)
-            self.selected_page_index = page_number - 1
-            print(f"PDF selecionado: {self.selected_pdf}, Página: {page_number}, "
-                  f"Índice real: {self.selected_page_index}, Status: {status}")
-
-            if os.path.exists(self.selected_pdf):
-                try:
-                    self.render_pdf_page(self.selected_pdf, page_number)
-                except Exception as e:
-                    print(f"Erro ao abrir o PDF: {str(e)}")
-                    messagebox.showerror("Erro", f"Não foi possível abrir o PDF: {str(e)}")
-            else:
-                print("Erro: Arquivo PDF não encontrado!")
-                messagebox.showerror("Erro", "Arquivo PDF não encontrado!")
-        except (tk.TclError, ValueError) as e:
-            print(f"Erro ao acessar o item: {str(e)}")
-
-    def open_pdf_directory(self):
-        if os.path.exists(self.selected_directory):
-            os.startfile(self.selected_directory)
-        else:
-            messagebox.showerror("Erro", "Diretório dos PDFs não encontrado!")
-
     def delete_selected_pdf(self):
+        threading.Thread(target=self._delete_selected_pdf_thread, daemon=True).start()
+
+    def _delete_selected_pdf_thread(self):
         try:
             selected_items = self.pending_files_tree.selection()
             if not selected_items:
@@ -686,6 +608,33 @@ class AnalysisScreen:
             if not resposta:
                 return
 
+            # Configuração inicial da janela de progresso
+            progress_window = tk.Toplevel(self.window)
+            progress_window.title("Progresso da Exclusão")
+            progress_window.geometry("300x100")
+            progress_window.configure(bg="#2B3E50")
+
+            progress_label = tk.Label(
+                progress_window,
+                text="Excluindo páginas...",
+                bg="#2B3E50",
+                fg="white",
+                font=("Segoe UI", 10, "bold")
+            )
+            progress_label.pack(pady=10)
+
+            progress_var = tk.DoubleVar()
+            progress_bar = ttk.Progressbar(
+                progress_window,
+                orient="horizontal",
+                length=250,
+                mode="determinate",
+                variable=progress_var
+            )
+            progress_bar.pack(pady=10)
+
+            progress_bar["maximum"] = total_pages
+
             pages_to_delete = {}
             for item in selected_items:
                 pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
@@ -695,12 +644,13 @@ class AnalysisScreen:
                     pages_to_delete[pdf_name] = []
                 pages_to_delete[pdf_name].append(page_index)
 
+            current_progress = 0
+
             # Deleta as páginas de cada PDF
             for pdf_name, page_indices in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
                 if os.path.exists(pdf_path):
                     pdf_document = fitz.open(pdf_path)
-                    # Deleta primeiro as páginas de índice maior
                     for page_index in sorted(page_indices, reverse=True):
                         if 0 <= page_index < pdf_document.page_count:
                             pdf_document.delete_page(page_index)
@@ -714,24 +664,74 @@ class AnalysisScreen:
 
                     self.update_report_and_treeview(pdf_name, page_indices)
                     self.clear_canvas()
-                else:
-                    messagebox.showerror("Erro", f"O arquivo PDF {pdf_name} não foi encontrado.")
+
+                current_progress += len(page_indices)
+                progress_var.set(current_progress)
+                progress_window.update_idletasks()
 
             messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
         except Exception as e:
             messagebox.showerror("Erro", f"Ocorreu um erro ao deletar as páginas: {str(e)}")
+        finally:
+            progress_window.destroy()
+
+    def load_pending_files(self):
+        self.pending_files_tree.delete(*self.pending_files_tree.get_children())
+        try:
+            df = pd.read_excel(self.analysis_report_path)
+            pending_pages = df[
+                (df['Status'] != 'OK') &
+                (df['Status'] != 'Identificado conteúdo após reanálise')
+            ][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
+
+            pending_pages = pending_pages.sort_values(by="Página", ascending=False)
+
+            for _, row in pending_pages.iterrows():
+                pdf_name = row['Arquivo PDF']
+                page_number = row['Página']
+                status = row['Status']
+                self.pending_files_tree.insert("", 'end', values=(pdf_name, page_number, status))
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao carregar o relatório: {str(e)}")
+
+    def on_pdf_select(self, event):
+        selected_item = self.pending_files_tree.selection()
+        if not selected_item:
+            return
+
+        try:
+            first_item = selected_item[0]
+            selected_entry = self.pending_files_tree.item(first_item, "values")
+
+            if not selected_entry:
+                raise ValueError("O item selecionado não está mais disponível.")
+
+            pdf_name, page_info, status = selected_entry
+            self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
+            page_number = int(page_info)
+            self.selected_page_index = page_number - 1
+
+            if os.path.exists(self.selected_pdf):
+                self.render_pdf_page(self.selected_pdf, page_number)
+            else:
+                messagebox.showerror("Erro", "Arquivo PDF não encontrado!")
+        except (tk.TclError, ValueError) as e:
+            print(f"Erro ao acessar o item: {str(e)}")
+
+    def open_pdf_directory(self):
+        if os.path.exists(self.selected_directory):
+            os.startfile(self.selected_directory)
+        else:
+            messagebox.showerror("Erro", "Diretório dos PDFs não encontrado!")
 
     def update_report_and_treeview(self, pdf_name, deleted_page_indices):
         report_path = self.analysis_report_path
         df = pd.read_excel(report_path)
 
-        # Também remove do DF em ordem decrescente
         for page_index in sorted(deleted_page_indices, reverse=True):
             page_number = page_index + 1
-            # Remove a página deletada
             df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'] == page_number))]
 
-            # Renumera as páginas seguintes
             df.loc[
                 (df['Arquivo PDF'] == pdf_name) & (df['Página'] > page_number),
                 'Página'
@@ -739,40 +739,7 @@ class AnalysisScreen:
 
         df.to_excel(report_path, index=False)
 
-        self.pending_files_tree.delete(*self.pending_files_tree.get_children())
         self.load_pending_files()
-
-    def sort_by_status(self):
-        items = list(self.pending_files_tree.get_children())
-        data = []
-        for item in items:
-            values = self.pending_files_tree.item(item, "values")
-            pdf_name = values[0]
-            page_number = values[1]
-            status = values[2]
-            data.append((status, pdf_name, page_number, item))
-
-        data.sort(reverse=self.status_sort_reverse, key=lambda t: t[0])
-
-        for index, row_data in enumerate(data):
-            _, _, _, item_id = row_data
-            self.pending_files_tree.move(item_id, '', index)
-
-        arrow = "▼" if self.status_sort_reverse else "▲"
-        self.pending_files_tree.heading("Status", text=f"Status {arrow}")
-        self.status_sort_reverse = not self.status_sort_reverse
-
-    def sort_by_page(self):
-        items = list(self.pending_files_tree.get_children())
-        data = [(self.pending_files_tree.item(item, "values"), item) for item in items]
-        data.sort(key=lambda x: int(x[0][1]), reverse=self.page_sort_reverse)
-
-        for index, (values, item) in enumerate(data):
-            self.pending_files_tree.move(item, '', index)
-
-        arrow = "▼" if self.page_sort_reverse else "▲"
-        self.pending_files_tree.heading("Página", text=f"Página {arrow}")
-        self.page_sort_reverse = not self.page_sort_reverse
 
     def render_pdf_page(self, pdf_path, page_number):
         try:
@@ -817,8 +784,45 @@ class AnalysisScreen:
         self.pdf_canvas.delete("all")
         self.pdf_canvas.image = None
 
+    def sort_by_status(self):
+        items = list(self.pending_files_tree.get_children())
+        data = []
+        for item in items:
+            values = self.pending_files_tree.item(item, "values")
+            pdf_name = values[0]
+            page_number = values[1]
+            status = values[2]
+            data.append((status, pdf_name, page_number, item))
+
+        data.sort(reverse=self.status_sort_reverse, key=lambda t: t[0])
+        for index, row_data in enumerate(data):
+            _, _, _, item_id = row_data
+            self.pending_files_tree.move(item_id, '', index)
+
+        arrow = "\u25BC" if self.status_sort_reverse else "\u25B2"
+        self.pending_files_tree.heading("Status", text=f"Status {arrow}")
+        self.status_sort_reverse = not self.status_sort_reverse
+
+    def sort_by_page(self):
+        items = list(self.pending_files_tree.get_children())
+        data = [(self.pending_files_tree.item(item, "values"), item) for item in items]
+        data.sort(key=lambda x: int(x[0][1]), reverse=self.page_sort_reverse)
+
+        for index, (values, item) in enumerate(data):
+            self.pending_files_tree.move(item, '', index)
+
+        arrow = "\u25BC" if self.page_sort_reverse else "\u25B2"
+        self.pending_files_tree.heading("Página", text=f"Página {arrow}")
+        self.page_sort_reverse = not self.page_sort_reverse
+
+    def select_all_items(self, event):
+        all_items = self.pending_files_tree.get_children()
+        self.pending_files_tree.selection_set(all_items)
+
+    def on_delete_key_press(self, event):
+        self.delete_selected_pdf()
+
     def center_image(self, event):
-        """Centraliza a imagem no Canvas quando ele é redimensionado."""
         self.pdf_canvas.delete('all')
         if hasattr(self, 'pdf_image'):
             self.pdf_canvas.create_image(
@@ -956,7 +960,7 @@ class PDFAnalyzer:
             if (ocr_successful or quantidade_caracteres >= 20) and white_pixel_percentage <= 0.995:
                 status = "Identificado conteúdo após reanálise"
                 self.pages_ocr_analyzed_count += 1
-            elif quantidade_caracteres >= 2 and white_pixel_percentage >= self.pixel_threshold:
+            elif quantidade_caracteres >= 5 and white_pixel_percentage >= self.pixel_threshold:
                 status = "Necessidade de revisão"
                 self.pages_low_info_count += 1  # Atualiza o contador para esse status
             else:
