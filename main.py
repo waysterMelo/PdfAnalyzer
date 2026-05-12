@@ -41,7 +41,7 @@ def verify_signature(data, signature):
     return hmac.compare_digest(create_signature(data), signature)
 
 def check_license():
-    """Verifica se a licença de teste ainda é válida e inicializa a data de instalação se necessário."""
+    """Verifica se a licença ainda é válida e inicializa a data de instalação se necessário."""
     global activation_time
 
     try:
@@ -71,13 +71,13 @@ def check_license():
         # Verificar o tempo de expiração
         expiration_time = activation_time + timedelta(minutes=duracao_em_minutos)
         if datetime.now() > expiration_time:
-            # Se o período de teste tiver expirado
-            messagebox.showwarning("Licença Expirada", "Seu período de teste expirou. O programa será encerrado.")
+            # Se o período tiver expirado
+            messagebox.showwarning("Licença Expirada", "Sua licença expirou. O programa será encerrado.")
             return False
         else:
             remaining_time = expiration_time - datetime.now()
             remaining_minutes = int(remaining_time.total_seconds() // 60)
-            messagebox.showinfo("Licença de Teste", f"Você tem {remaining_minutes} minutos restantes de teste.")
+            messagebox.showinfo("Licença Ativa", f"Você tem {remaining_minutes} minutos restantes de uso.")
             return True
 
     except Exception as e:

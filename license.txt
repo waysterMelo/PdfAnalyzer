@@ -1,1 +1,1 @@
-{"activation_time": "2025-01-03T17:31:43.896216", "duracao": 10000, "signature": "0393d3f9cf6587aa757d53111a15c06ff8917816f7075efc8c9db0775f366396"}
+{"activation_time": "2026-05-12T14:22:47.064738", "duracao": 43200, "signature": "f31b0f066ce354e09c0e2f71eef53161af2a4e0225489cfec34a9c8ca1f05905"}
