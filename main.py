@@ -524,14 +524,25 @@ class AnalysisScreen:
 
         # Treeview para exibir arquivos pendentes
         columns = ("Arquivo PDF", "Página", "Status")
+        self.pending_files_frame = ttk.Frame(self.window, style="TFrame")
+        self.pending_files_frame.pack(pady=20, padx=10, fill='y', side='left')
+
+        self.pending_files_scrollbar = ttk.Scrollbar(
+            self.pending_files_frame,
+            orient="vertical"
+        )
+
         self.pending_files_tree = ttk.Treeview(
-            self.window,
+            self.pending_files_frame,
             columns=columns,
             show="headings",
             height=25,
-            selectmode='extended'  # permite seleção múltipla
+            selectmode='extended',  # permite seleção múltipla
+            yscrollcommand=self.pending_files_scrollbar.set
         )
-        self.pending_files_tree.pack(pady=20, padx=10, fill='y', side='left')
+        self.pending_files_tree.pack(side='left', fill='y')
+        self.pending_files_scrollbar.config(command=self.pending_files_tree.yview)
+        self.pending_files_scrollbar.pack(side='right', fill='y')
 
         self.pending_files_tree.heading("Arquivo PDF", text="Arquivo PDF")
         self.pending_files_tree.heading("Página", text="Página")
@@ -592,6 +603,7 @@ class AnalysisScreen:
         threading.Thread(target=self._delete_selected_pdf_thread, daemon=True).start()
 
     def _delete_selected_pdf_thread(self):
+        progress_window = None
         try:
             selected_items = self.pending_files_tree.selection()
             if not selected_items:
@@ -673,7 +685,8 @@ class AnalysisScreen:
         except Exception as e:
             messagebox.showerror("Erro", f"Ocorreu um erro ao deletar as páginas: {str(e)}")
         finally:
-            progress_window.destroy()
+            if progress_window is not None and progress_window.winfo_exists():
+                progress_window.destroy()
 
     def load_pending_files(self):
         self.pending_files_tree.delete(*self.pending_files_tree.get_children())
@@ -783,6 +796,8 @@ class AnalysisScreen:
     def clear_canvas(self):
         self.pdf_canvas.delete("all")
         self.pdf_canvas.image = None
+        self.selected_pdf = None
+        self.selected_page_index = None
 
     def sort_by_status(self):
         items = list(self.pending_files_tree.get_children())
