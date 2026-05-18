@@ -1,8 +1,5 @@
-import hashlib
 import platform
-import hmac
 import io
-import json
 import os
 import queue
 import re
@@ -16,7 +13,7 @@ import fitz
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageTk, ImageFilter, ImageEnhance
-from datetime import datetime, timedelta
+from datetime import datetime
 import sys
 import pytesseract
 from tkinter import messagebox
@@ -26,63 +23,9 @@ from openpyxl.workbook import Workbook
 from pytesseract import pytesseract
 from ttkthemes.themed_tk import ThemedTk
 
-SECRET_KEY = b"waystermelo@"
-LICENSE_FILE = "license.txt"
 
 
 image_path = os.path.join(os.path.dirname(__file__), 'img', 'logo.webp')
-
-def create_signature(data):
-    """Cria uma assinatura HMAC-SHA256 para os dados fornecidos."""
-    return hmac.new(SECRET_KEY, data.encode('utf-8'), hashlib.sha256).hexdigest()
-
-def verify_signature(data, signature):
-    """Verifica se a assinatura fornecida corresponde ao conteúdo dos dados."""
-    return hmac.compare_digest(create_signature(data), signature)
-
-def check_license():
-    """Verifica se a licença ainda é válida e inicializa a data de instalação se necessário."""
-    global activation_time
-
-    try:
-        # Verificar se o arquivo de licença existe
-        if os.path.exists(LICENSE_FILE):
-            with open(LICENSE_FILE, "r") as file:
-                content = json.load(file)
-                data_str = f"{content['activation_time']}|{content['duracao']}"
-                saved_signature = content.get("signature")
-                duracao_em_minutos = content.get("duracao")  # Carregar a duração diretamente do arquivo de licença
-
-                # Verificar se a duração foi corretamente especificada
-                if not isinstance(duracao_em_minutos, int) or duracao_em_minutos <= 0:
-                    raise ValueError("Duração da licença inválida ou ausente no arquivo de licença.")
-
-                # Verificar a integridade do arquivo com a assinatura
-                if not verify_signature(data_str, saved_signature):
-                    messagebox.showerror("Erro de Licença", "A licença foi manipulada! O programa será encerrado.")
-                    return False
-
-                # Carregar a data de ativação a partir do arquivo
-                activation_time = datetime.fromisoformat(content["activation_time"])
-        else:
-            messagebox.showerror("Erro de Licença", "Arquivo de licença não encontrado! O programa será encerrado.")
-            return False
-
-        # Verificar o tempo de expiração
-        expiration_time = activation_time + timedelta(minutes=duracao_em_minutos)
-        if datetime.now() > expiration_time:
-            # Se o período tiver expirado
-            messagebox.showwarning("Licença Expirada", "Sua licença expirou. O programa será encerrado.")
-            return False
-        else:
-            remaining_time = expiration_time - datetime.now()
-            remaining_minutes = int(remaining_time.total_seconds() // 60)
-            messagebox.showinfo("Licença Ativa", f"Você tem {remaining_minutes} minutos restantes de uso.")
-            return True
-
-    except Exception as e:
-        messagebox.showerror("Erro de Licença", f"Ocorreu um erro ao verificar a licença: {str(e)}")
-        return False
 
 def configurar_tesseract():
     """Configuração do Tesseract OCR."""
@@ -94,9 +37,6 @@ def configurar_tesseract():
 def iniciar_interface_principal():
     """Inicia a interface principal da aplicação."""
     global root, bg_image
-    if not check_license():
-        # Se a licença estiver expirada ou com erro, o programa é encerrado
-        return
 
     root = tk.Tk()
     root.title("PDF Analyzer Blank")
@@ -696,10 +636,15 @@ class AnalysisScreen:
             return
 
         total_pages = len(items_to_delete)
+        paginas_texto = "\n".join(
+            f"{pdf_name} - página {original_page_number}"
+            for pdf_name, original_page_number, _ in items_to_delete
+        )
+
         confirm_text = (
-            "Deseja realmente excluir a página selecionada?"
-            if total_pages == 1
-            else f"Deseja realmente excluir as {total_pages} páginas selecionadas?"
+            "As seguintes páginas serão excluídas:\n\n"
+            f"{paginas_texto}\n\n"
+            "Deseja continuar?"
         )
 
         resposta = messagebox.askyesno("Confirmação", confirm_text)
