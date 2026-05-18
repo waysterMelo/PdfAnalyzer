@@ -494,6 +494,14 @@ class AnalysisScreen:
         self.window.state('zoomed')
         self.window.configure(bg="#2B3E50")
 
+        # Controle interno para evitar travamentos e renderizações antigas
+        self.is_deleting = False
+        self.render_after_id = None
+        self.last_render_key = None
+        self.pdf_image = None
+        self.selected_pdf = None
+        self.selected_page_index = None
+
         # ============ Estilo original ============
         style = ttk.Style(self.window)
         style.configure("TFrame", background="#0e0d2a")
@@ -503,6 +511,7 @@ class AnalysisScreen:
 
         self.analysis_report_path = analysis_report_path
         self.selected_directory = os.path.dirname(analysis_report_path)
+        self._ensure_report_tracking_columns()
 
         # Frame de cabeçalho
         self.header_frame = ttk.Frame(self.window, style="TFrame")
@@ -537,7 +546,7 @@ class AnalysisScreen:
             columns=columns,
             show="headings",
             height=25,
-            selectmode='extended',  # permite seleção múltipla
+            selectmode='extended',
             yscrollcommand=self.pending_files_scrollbar.set
         )
         self.pending_files_tree.pack(side='left', fill='y')
@@ -552,7 +561,7 @@ class AnalysisScreen:
         self.pending_files_tree.heading("Página", text="Página", command=self.sort_by_page)
 
         self.pending_files_tree.column("Arquivo PDF", width=200)
-        self.pending_files_tree.column("Página", width=50, anchor='center')
+        self.pending_files_tree.column("Página", width=70, anchor='center')
         self.pending_files_tree.column("Status", width=190, anchor='center')
 
         # Frame de visualização do PDF
@@ -572,7 +581,7 @@ class AnalysisScreen:
         self.window.bind("<Delete>", self.on_delete_key_press)
 
         # Botão de deletar páginas
-        delete_button = tk.Button(
+        self.delete_button = tk.Button(
             self.pdf_view_frame,
             text="Deletar Página Selecionada",
             command=self.delete_selected_pdf,
@@ -583,7 +592,7 @@ class AnalysisScreen:
             padx=10,
             pady=5
         )
-        delete_button.pack(side='bottom', pady=5)
+        self.delete_button.pack(side='bottom', pady=5)
 
         # Botão para abrir diretório
         open_button = tk.Button(
@@ -599,117 +608,302 @@ class AnalysisScreen:
         # Atalho CTRL + A para selecionar tudo
         self.window.bind("<Control-a>", self.select_all_items)
 
-    def delete_selected_pdf(self):
-        threading.Thread(target=self._delete_selected_pdf_thread, daemon=True).start()
-
-    def _delete_selected_pdf_thread(self):
-        progress_window = None
+    def _ensure_report_tracking_columns(self):
+        """Cria colunas de controle para manter a página original e marcar páginas excluídas."""
         try:
-            selected_items = self.pending_files_tree.selection()
-            if not selected_items:
-                messagebox.showwarning("Aviso", "Nenhum PDF selecionado!")
-                return
+            df = pd.read_excel(self.analysis_report_path)
+            changed = False
 
-            total_pages = len(selected_items)
-            if total_pages == 1:
-                confirm_text = "Deseja realmente excluir a página selecionada?"
-            else:
-                confirm_text = f"Deseja realmente excluir as {total_pages} páginas selecionadas?"
+            if "Página Original" not in df.columns:
+                df["Página Original"] = df["Página"]
+                changed = True
 
-            resposta = messagebox.askyesno("Confirmação", confirm_text)
-            if not resposta:
-                return
+            if "Excluído" not in df.columns:
+                df["Excluído"] = "Não"
+                changed = True
 
-            # Configuração inicial da janela de progresso
-            progress_window = tk.Toplevel(self.window)
-            progress_window.title("Progresso da Exclusão")
-            progress_window.geometry("300x100")
-            progress_window.configure(bg="#2B3E50")
+            df["Página Original"] = pd.to_numeric(df["Página Original"], errors="coerce").fillna(df["Página"])
+            df["Página Original"] = df["Página Original"].astype(int)
+            df["Excluído"] = df["Excluído"].fillna("Não")
 
-            progress_label = tk.Label(
-                progress_window,
-                text="Excluindo páginas...",
-                bg="#2B3E50",
-                fg="white",
-                font=("Segoe UI", 10, "bold")
-            )
-            progress_label.pack(pady=10)
+            if changed:
+                df.to_excel(self.analysis_report_path, index=False)
 
-            progress_var = tk.DoubleVar()
-            progress_bar = ttk.Progressbar(
-                progress_window,
-                orient="horizontal",
-                length=250,
-                mode="determinate",
-                variable=progress_var
-            )
-            progress_bar.pack(pady=10)
+            return df
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao preparar o relatório: {str(e)}")
+            return pd.DataFrame()
 
-            progress_bar["maximum"] = total_pages
+    def _get_current_page_number(self, df, pdf_name, original_page_number):
+        """Converte a página original do relatório para a página atual do PDF após exclusões."""
+        if df.empty:
+            return original_page_number
 
+        pdf_rows = df[df["Arquivo PDF"] == pdf_name].copy()
+        if pdf_rows.empty or "Excluído" not in pdf_rows.columns:
+            return original_page_number
+
+        deleted_rows = pdf_rows[pdf_rows["Excluído"].astype(str).str.upper().isin(["SIM", "TRUE", "1"])]
+        deleted_original_pages = pd.to_numeric(
+            deleted_rows.get("Página Original", deleted_rows.get("Página")),
+            errors="coerce"
+        ).dropna().astype(int).tolist()
+
+        deleted_before = sum(1 for page in deleted_original_pages if page < original_page_number)
+        current_page_number = original_page_number - deleted_before
+        return max(1, current_page_number)
+
+    def _cancel_pending_render(self):
+        if hasattr(self, "render_after_id") and self.render_after_id:
+            try:
+                self.window.after_cancel(self.render_after_id)
+            except tk.TclError:
+                pass
+            self.render_after_id = None
+
+    def delete_selected_pdf(self):
+        self._cancel_pending_render()
+
+        if getattr(self, "is_deleting", False):
+            return
+
+        selected_items = self.pending_files_tree.selection()
+        if not selected_items:
+            messagebox.showwarning("Aviso", "Nenhum PDF selecionado!")
+            return
+
+        df = self._ensure_report_tracking_columns()
+        if df.empty:
+            return
+
+        items_to_delete = []
+        for item in selected_items:
+            values = self.pending_files_tree.item(item, "values")
+            if not values:
+                continue
+
+            pdf_name, page_info, status = values
+            try:
+                original_page_number = int(page_info)
+                current_page_number = self._get_current_page_number(df, pdf_name, original_page_number)
+                current_page_index = current_page_number - 1
+                items_to_delete.append((pdf_name, original_page_number, current_page_index))
+            except ValueError:
+                continue
+
+        if not items_to_delete:
+            messagebox.showwarning("Aviso", "Nenhuma página válida selecionada!")
+            return
+
+        total_pages = len(items_to_delete)
+        confirm_text = (
+            "Deseja realmente excluir a página selecionada?"
+            if total_pages == 1
+            else f"Deseja realmente excluir as {total_pages} páginas selecionadas?"
+        )
+
+        resposta = messagebox.askyesno("Confirmação", confirm_text)
+        if not resposta:
+            return
+
+        self.is_deleting = True
+        self.delete_button.config(state="disabled")
+        self.pending_files_tree.config(selectmode="none")
+        self.clear_canvas()
+
+        self.progress_window = tk.Toplevel(self.window)
+        self.progress_window.title("Progresso da Exclusão")
+        self.progress_window.geometry("320x120")
+        self.progress_window.configure(bg="#2B3E50")
+        self.progress_window.transient(self.window)
+        self.progress_window.grab_set()
+
+        self.progress_label = tk.Label(
+            self.progress_window,
+            text="Excluindo páginas...",
+            bg="#2B3E50",
+            fg="white",
+            font=("Segoe UI", 10, "bold")
+        )
+        self.progress_label.pack(pady=10)
+
+        self.delete_progress_var = tk.DoubleVar()
+        self.delete_progress_bar = ttk.Progressbar(
+            self.progress_window,
+            orient="horizontal",
+            length=260,
+            mode="determinate",
+            variable=self.delete_progress_var,
+            maximum=total_pages
+        )
+        self.delete_progress_bar.pack(pady=10)
+
+        threading.Thread(
+            target=self._delete_selected_pdf_worker,
+            args=(items_to_delete,),
+            daemon=True
+        ).start()
+
+    def _delete_selected_pdf_worker(self, items_to_delete):
+        try:
             pages_to_delete = {}
-            for item in selected_items:
-                pdf_name, page_info, status = self.pending_files_tree.item(item, "values")
-                page_index = int(page_info) - 1
+            for pdf_name, original_page_number, current_page_index in items_to_delete:
+                pages_to_delete.setdefault(pdf_name, []).append((original_page_number, current_page_index))
 
-                if pdf_name not in pages_to_delete:
-                    pages_to_delete[pdf_name] = []
-                pages_to_delete[pdf_name].append(page_index)
-
+            deleted_map = {}
             current_progress = 0
 
-            # Deleta as páginas de cada PDF
-            for pdf_name, page_indices in pages_to_delete.items():
+            for pdf_name, page_pairs in pages_to_delete.items():
                 pdf_path = os.path.join(self.selected_directory, pdf_name)
-                if os.path.exists(pdf_path):
+
+                # Ordena pela página atual em ordem decrescente para não bagunçar índices durante a exclusão.
+                unique_pairs = []
+                seen_current_indexes = set()
+                for original_page_number, current_page_index in sorted(page_pairs, key=lambda item: item[1], reverse=True):
+                    if current_page_index not in seen_current_indexes:
+                        unique_pairs.append((original_page_number, current_page_index))
+                        seen_current_indexes.add(current_page_index)
+
+                if not os.path.exists(pdf_path):
+                    current_progress += len(unique_pairs)
+                    self.window.after(0, self._update_delete_progress, current_progress)
+                    continue
+
+                pdf_document = None
+                valid_original_pages = []
+
+                try:
                     pdf_document = fitz.open(pdf_path)
-                    for page_index in sorted(page_indices, reverse=True):
-                        if 0 <= page_index < pdf_document.page_count:
-                            pdf_document.delete_page(page_index)
+                    valid_pairs = [
+                        (original_page_number, current_page_index)
+                        for original_page_number, current_page_index in unique_pairs
+                        if 0 <= current_page_index < pdf_document.page_count
+                    ]
 
-                    temp_pdf_path = pdf_path + ".tmp"
-                    pdf_document.save(temp_pdf_path)
-                    pdf_document.close()
+                    if not valid_pairs:
+                        current_progress += len(unique_pairs)
+                        self.window.after(0, self._update_delete_progress, current_progress)
+                        continue
 
-                    os.remove(pdf_path)
-                    os.rename(temp_pdf_path, pdf_path)
+                    if len(valid_pairs) >= pdf_document.page_count:
+                        valid_original_pages = [original_page_number for original_page_number, _ in valid_pairs]
+                        pdf_document.close()
+                        pdf_document = None
+                        os.remove(pdf_path)
+                    else:
+                        for original_page_number, current_page_index in valid_pairs:
+                            pdf_document.delete_page(current_page_index)
+                            valid_original_pages.append(original_page_number)
 
-                    self.update_report_and_treeview(pdf_name, page_indices)
-                    self.clear_canvas()
+                        temp_pdf_path = pdf_path + ".tmp"
+                        pdf_document.save(temp_pdf_path, garbage=4, deflate=True)
+                        pdf_document.close()
+                        pdf_document = None
 
-                current_progress += len(page_indices)
-                progress_var.set(current_progress)
-                progress_window.update_idletasks()
+                        os.replace(temp_pdf_path, pdf_path)
 
-            messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
+                    if valid_original_pages:
+                        deleted_map[pdf_name] = valid_original_pages
+
+                finally:
+                    if pdf_document is not None:
+                        pdf_document.close()
+
+                current_progress += len(unique_pairs)
+                self.window.after(0, self._update_delete_progress, current_progress)
+
+            self._mark_report_pages_as_deleted(deleted_map)
+            self.window.after(0, self._finish_delete_success)
+
         except Exception as e:
-            messagebox.showerror("Erro", f"Ocorreu um erro ao deletar as páginas: {str(e)}")
-        finally:
-            if progress_window is not None and progress_window.winfo_exists():
-                progress_window.destroy()
+            self.window.after(0, self._finish_delete_error, str(e))
+
+    def _update_delete_progress(self, value):
+        if hasattr(self, "delete_progress_var"):
+            self.delete_progress_var.set(value)
+
+    def _mark_report_pages_as_deleted(self, deleted_map):
+        if not deleted_map:
+            return
+
+        df = self._ensure_report_tracking_columns()
+        if df.empty:
+            return
+
+        for pdf_name, original_pages in deleted_map.items():
+            original_pages = [int(page) for page in original_pages]
+            mask = (
+                (df["Arquivo PDF"] == pdf_name) &
+                (df["Página Original"].astype(int).isin(original_pages))
+            )
+            df.loc[mask, "Excluído"] = "Sim"
+
+        df.to_excel(self.analysis_report_path, index=False)
+
+    def _finish_delete_success(self):
+        self._cancel_pending_render()
+        self.load_pending_files()
+        self.clear_canvas()
+        self._close_delete_progress()
+        messagebox.showinfo("Sucesso", "As páginas selecionadas foram deletadas com sucesso.")
+
+    def _finish_delete_error(self, error_message):
+        self._close_delete_progress()
+        messagebox.showerror("Erro", f"Ocorreu um erro ao deletar as páginas: {error_message}")
+
+    def _close_delete_progress(self):
+        self.is_deleting = False
+
+        if hasattr(self, "delete_button"):
+            self.delete_button.config(state="normal")
+
+        self.pending_files_tree.config(selectmode="extended")
+
+        if hasattr(self, "progress_window") and self.progress_window.winfo_exists():
+            self.progress_window.grab_release()
+            self.progress_window.destroy()
 
     def load_pending_files(self):
         self.pending_files_tree.delete(*self.pending_files_tree.get_children())
         try:
-            df = pd.read_excel(self.analysis_report_path)
-            pending_pages = df[
-                (df['Status'] != 'OK') &
-                (df['Status'] != 'Identificado conteúdo após reanálise')
-            ][['Arquivo PDF', 'Página', 'Status']].drop_duplicates()
+            df = self._ensure_report_tracking_columns()
+            if df.empty:
+                return
 
-            pending_pages = pending_pages.sort_values(by="Página", ascending=False)
+            visible_df = df[~df["Excluído"].astype(str).str.upper().isin(["SIM", "TRUE", "1"])]
+            pending_pages = visible_df[
+                (visible_df['Status'] != 'OK') &
+                (visible_df['Status'] != 'Identificado conteúdo após reanálise')
+            ][['Arquivo PDF', 'Página Original', 'Status']].drop_duplicates()
+
+            pending_pages = pending_pages.sort_values(by="Página Original", ascending=False)
 
             for _, row in pending_pages.iterrows():
                 pdf_name = row['Arquivo PDF']
-                page_number = row['Página']
+                page_number = int(row['Página Original'])
                 status = row['Status']
                 self.pending_files_tree.insert("", 'end', values=(pdf_name, page_number, status))
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao carregar o relatório: {str(e)}")
 
     def on_pdf_select(self, event):
+        if getattr(self, "is_deleting", False):
+            return
+
         selected_item = self.pending_files_tree.selection()
         if not selected_item:
+            return
+
+        if len(selected_item) > 1:
+            self._cancel_pending_render()
+            self.pdf_canvas.delete("all")
+            self.pdf_canvas.create_text(
+                self.pdf_canvas.winfo_width() // 2,
+                self.pdf_canvas.winfo_height() // 2,
+                text=f"{len(selected_item)} páginas selecionadas",
+                fill="white",
+                font=("Segoe UI", 18, "bold")
+            )
             return
 
         try:
@@ -720,14 +914,22 @@ class AnalysisScreen:
                 raise ValueError("O item selecionado não está mais disponível.")
 
             pdf_name, page_info, status = selected_entry
-            self.selected_pdf = os.path.join(self.selected_directory, pdf_name)
-            page_number = int(page_info)
-            self.selected_page_index = page_number - 1
+            pdf_path = os.path.join(self.selected_directory, pdf_name)
+            original_page_number = int(page_info)
 
-            if os.path.exists(self.selected_pdf):
-                self.render_pdf_page(self.selected_pdf, page_number)
-            else:
+            self.selected_pdf = pdf_path
+            self.selected_page_index = original_page_number - 1
+
+            if not os.path.exists(pdf_path):
                 messagebox.showerror("Erro", "Arquivo PDF não encontrado!")
+                return
+
+            self._cancel_pending_render()
+            self.render_after_id = self.window.after(
+                250,
+                lambda: self.render_pdf_page(pdf_path, original_page_number)
+            )
+
         except (tk.TclError, ValueError) as e:
             print(f"Erro ao acessar o item: {str(e)}")
 
@@ -738,40 +940,53 @@ class AnalysisScreen:
             messagebox.showerror("Erro", "Diretório dos PDFs não encontrado!")
 
     def update_report_and_treeview(self, pdf_name, deleted_page_indices):
-        report_path = self.analysis_report_path
-        df = pd.read_excel(report_path)
-
-        for page_index in sorted(deleted_page_indices, reverse=True):
-            page_number = page_index + 1
-            df = df[~((df['Arquivo PDF'] == pdf_name) & (df['Página'] == page_number))]
-
-            df.loc[
-                (df['Arquivo PDF'] == pdf_name) & (df['Página'] > page_number),
-                'Página'
-            ] -= 1
-
-        df.to_excel(report_path, index=False)
-
+        # Mantido por compatibilidade, mas agora o fluxo correto marca linhas como excluídas.
+        original_pages = [int(page_index) + 1 for page_index in deleted_page_indices]
+        self._mark_report_pages_as_deleted({pdf_name: original_pages})
         self.load_pending_files()
 
-    def render_pdf_page(self, pdf_path, page_number):
+    def render_pdf_page(self, pdf_path, original_page_number):
         try:
-            os.environ["PDF2IMAGE_PDFIUM_PATH"] = r"C:/pdfium/pdfium.dll"
-            from pdf2image import convert_from_path
-
-            images = convert_from_path(
-                pdf_path,
-                first_page=page_number,
-                last_page=page_number,
-                dpi=200
-            )
-            if not images:
-                messagebox.showerror("Erro", f"Número de página {page_number} está fora do intervalo.")
+            if not os.path.exists(pdf_path):
+                self.clear_canvas()
+                messagebox.showerror("Erro", "Arquivo PDF não encontrado!")
                 return
 
-            pil_image = images[0]
-            canvas_width = self.pdf_canvas.winfo_width()
-            canvas_height = self.pdf_canvas.winfo_height()
+            df = self._ensure_report_tracking_columns()
+            pdf_name = os.path.basename(pdf_path)
+            current_page_number = self._get_current_page_number(df, pdf_name, int(original_page_number))
+
+            cache_key = (pdf_path, int(original_page_number), current_page_number)
+
+            if getattr(self, "last_render_key", None) == cache_key and hasattr(self, "pdf_image") and self.pdf_image:
+                self.center_image(None)
+                return
+
+            self.pdf_canvas.delete("all")
+            self.pdf_canvas.create_text(
+                self.pdf_canvas.winfo_width() // 2,
+                self.pdf_canvas.winfo_height() // 2,
+                text="Carregando página...",
+                fill="white",
+                font=("Segoe UI", 14, "bold")
+            )
+            self.window.update_idletasks()
+
+            with fitz.open(pdf_path) as doc:
+                if current_page_number < 1 or current_page_number > doc.page_count:
+                    self.clear_canvas()
+                    return
+
+                page = doc.load_page(current_page_number - 1)
+                zoom = 1.4
+                matrix = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+
+            pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+            canvas_width = max(self.pdf_canvas.winfo_width(), 400)
+            canvas_height = max(self.pdf_canvas.winfo_height(), 600)
+
             image_ratio = pil_image.width / pil_image.height
             canvas_ratio = canvas_width / canvas_height
 
@@ -790,14 +1005,18 @@ class AnalysisScreen:
             y = (canvas_height - new_height) // 2
             self.pdf_canvas.create_image(x, y, anchor="nw", image=self.pdf_image)
             self.pdf_canvas.image = self.pdf_image
+            self.last_render_key = cache_key
+
         except Exception as e:
             messagebox.showerror("Erro", f"Erro ao renderizar a página do PDF: {str(e)}")
 
     def clear_canvas(self):
         self.pdf_canvas.delete("all")
         self.pdf_canvas.image = None
+        self.pdf_image = None
         self.selected_pdf = None
         self.selected_page_index = None
+        self.last_render_key = None
 
     def sort_by_status(self):
         items = list(self.pending_files_tree.get_children())
@@ -833,13 +1052,15 @@ class AnalysisScreen:
     def select_all_items(self, event):
         all_items = self.pending_files_tree.get_children()
         self.pending_files_tree.selection_set(all_items)
+        return "break"
 
     def on_delete_key_press(self, event):
         self.delete_selected_pdf()
+        return "break"
 
     def center_image(self, event):
         self.pdf_canvas.delete('all')
-        if hasattr(self, 'pdf_image'):
+        if hasattr(self, 'pdf_image') and self.pdf_image:
             self.pdf_canvas.create_image(
                 self.pdf_canvas.winfo_width() // 2,
                 self.pdf_canvas.winfo_height() // 2,
